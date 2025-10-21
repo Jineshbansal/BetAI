@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { ethers } from 'ethers'
 
 const WalletContext = createContext(null)
 
@@ -10,6 +11,8 @@ export function WalletProvider({ children }) {
   })
   const [chainId, setChainId] = useState(null)
   const [balance, setBalance] = useState('0.0000')
+  const [provider, setProvider] = useState(null)
+  const [signer, setSigner] = useState(null)
 
   useEffect(() => {
     const { ethereum } = window
@@ -51,6 +54,30 @@ export function WalletProvider({ children }) {
     if (!account) { setBalance('0.0000'); return }
     refreshBalance()
   }, [account, chainId])
+
+  // Initialize ethers BrowserProvider once when ethereum is available
+  useEffect(() => {
+    const { ethereum } = window
+    if (!ethereum) { setProvider(null); return }
+    const prov = new ethers.BrowserProvider(ethereum)
+    setProvider(prov)
+  }, [])
+
+  // Refresh signer when account or provider changes
+  useEffect(() => {
+    let cancelled = false
+    async function fetchSigner() {
+      try {
+        if (!provider || !account) { setSigner(null); return }
+        const s = await provider.getSigner()
+        if (!cancelled) setSigner(s)
+      } catch {
+        if (!cancelled) setSigner(null)
+      }
+    }
+    fetchSigner()
+    return () => { cancelled = true }
+  }, [provider, account])
 
   function formatEthFromHexWei(hexWei) {
     try {
@@ -106,8 +133,8 @@ export function WalletProvider({ children }) {
   }
 
   const value = useMemo(
-    () => ({ account, isConnecting, connect, disconnect, autoConnect, setAutoConnect, chainId, balance, refreshBalance }),
-    [account, isConnecting, autoConnect, chainId, balance]
+    () => ({ account, isConnecting, connect, disconnect, autoConnect, setAutoConnect, chainId, balance, refreshBalance, provider, signer }),
+    [account, isConnecting, autoConnect, chainId, balance, provider, signer]
   )
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>

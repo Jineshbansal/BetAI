@@ -1,20 +1,22 @@
 import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWallet } from '../contexts/WalletContext'
+import { HEDERA_TESTNET_CHAIN_ID_HEX } from '../contracts/config'
 
 function short(addr) {
   return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : ''
 }
 
 export default function ConnectButton() {
-  const { account, isConnecting, connect, disconnect, autoConnect, setAutoConnect, balance } = useWallet()
+  const { account, isConnecting, connect, disconnect, autoConnect, setAutoConnect, balance, chainId } = useWallet()
   const [open, setOpen] = useState(false)
+  const unit = chainId === HEDERA_TESTNET_CHAIN_ID_HEX ? 'HBAR' : 'ETH'
 
   if (account) {
     return (
       <div className="flex items-center gap-3">
         <span className="hidden text-xs text-white/60 md:inline">{short(account)}</span>
-        <span className="hidden text-xs text-white/60 md:inline">{balance} ETH</span>
+  <span className="hidden text-xs text-white/60 md:inline">{balance} {unit}</span>
         <button
           onClick={disconnect}
           className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white/80 hover:text-white"

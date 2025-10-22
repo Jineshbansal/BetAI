@@ -7,10 +7,10 @@ import './index.css'
 import App from './App'
 import Home from './pages/Home'
 import PredictionMarket from './pages/PredictionMarket'
-import CustomAgent from './pages/CustomAgent'
 import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
 import Contact from './pages/Contact'
+import PredictOutput from './pages/PredictOutput'
 
 const router = createBrowserRouter([
   {
@@ -21,7 +21,7 @@ const router = createBrowserRouter([
         element: <RequireWallet />,
         children: [
           { path: '/prediction-market', element: <PredictionMarket /> },
-          { path: '/custom-agent', element: <CustomAgent /> },
+          { path: '/predict-output', element: <PredictOutput /> },
         ],
       },
       { path: '/privacy', element: <Privacy /> },

@@ -6,6 +6,7 @@ Test script to verify signal generation is working
 import requests
 import json
 
+
 def test_signal_generation():
     """Test the signal generation endpoint"""
     

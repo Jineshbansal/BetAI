@@ -7,7 +7,7 @@ export default function Header() {
   const links = [
     { label: 'Home', to: '/' },
     { label: 'Prediction Market', to: '/prediction-market' },
-    { label: 'Custom AI Agent', to: '/custom-agent' },
+    { label: 'Predict Output', to: '/predict-output' },
   ]
   return (
     <header className="sticky top-0 z-40 border-b border-white/5 bg-background/80 backdrop-blur">

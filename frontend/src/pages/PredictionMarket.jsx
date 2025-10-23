@@ -3,6 +3,8 @@ import { motion } from 'framer-motion'
 import { ethers } from 'ethers'
 import { useWallet } from '../contexts/WalletContext'
 import { CONTRACT_ADDRESS, contractABI, HEDERA_CONTRACT_ID, HEDERA_TESTNET_CHAIN_ID_HEX, HEDERA_TESTNET_RPC } from '../contracts/config'
+import PredictionGrid from '../components/PredictionGrid'
+import ResolveTab from '../components/ResolveTab'
 
 export default function PredictionMarket() {
   const { account, signer, chainId } = useWallet()
@@ -14,6 +16,9 @@ export default function PredictionMarket() {
   const [oracleAddr, setOracleAddr] = useState('')
   const [questionCount, setQuestionCount] = useState(null)
   const [hasCode, setHasCode] = useState(null) // null=unknown, true/false once checked
+  const [activeTab, setActiveTab] = useState('markets') // 'markets' | 'resolve'
+  const [questions, setQuestions] = useState([])
+  const [loadingQuestions, setLoadingQuestions] = useState(false)
 
   // addQuestion form
   const [newQ, setNewQ] = useState('')
@@ -169,27 +174,89 @@ export default function PredictionMarket() {
     }
   }
 
+  // Normalize a question by id using getMarket with fallback to questions()
+  async function getQuestionById(id) {
+    const c = readContract || contract
+    if (!c) return null
+    try {
+      const res = await c.getMarket(BigInt(id))
+      return {
+        id,
+        question: res[0],
+        outcomes: (res[1] || []).map((o) => ({ name: o.name, totalBetAmount: o.totalBetAmount?.toString?.() || String(o.totalBetAmount) })),
+        endTime: Number(res[2]),
+        marketResolved: Boolean(res[3]),
+        winningOutcome: Number(res[4]),
+        totalMarketPool: res[5]?.toString?.() || String(res[5])
+      }
+    } catch (e) {
+      try {
+        const q = await c.questions(BigInt(id))
+        return {
+          id,
+          question: q[0],
+          outcomes: [{ name: 'Yes', totalBetAmount: '0' }, { name: 'No', totalBetAmount: '0' }],
+          endTime: Number(q[1]),
+          marketResolved: Boolean(q[2]),
+          winningOutcome: Number(q[3]),
+          totalMarketPool: q[4]?.toString?.() || String(q[4])
+        }
+      } catch {
+        return null
+      }
+    }
+  }
+
+  // Fetch all questions like getQuestions() by iterating the counter
+  async function fetchAllQuestions() {
+    const c = readContract || contract
+    if (!c) return
+    setLoadingQuestions(true)
+    try {
+      setLastError('')
+      const counter = await c.questionCounter().catch(() => 0n)
+      const n = Number(counter || 0n)
+      const items = []
+      for (let i = 0; i < n; i++) {
+        // Many contracts are 0-based; if empty, skip
+        const q = await getQuestionById(i).catch(() => null)
+        if (q && q.question) items.push(q)
+      }
+      // If nothing found, try 1..n as a fallback for 1-based ids
+      if (items.length === 0) {
+        for (let i = 1; i <= n; i++) {
+          const q = await getQuestionById(i).catch(() => null)
+          if (q && q.question) items.push(q)
+        }
+      }
+      setQuestions(items)
+    } catch (e) {
+      setLastError(normalizeErr(e))
+    } finally {
+      setLoadingQuestions(false)
+    }
+  }
+
   useEffect(() => {
     // auto fetch on questionId change if valid
     if (questionId && (contract || readContract)) fetchMarket(questionId).catch(() => {})
   }, [questionId, contract, readContract])
 
-  async function onAddQuestion(e) {
-    e.preventDefault()
+  // Owner-only: Add question handler (used in Resolve tab)
+  async function handleAddQuestion({ question, outcomesCsv, endTime }) {
     if (!contract) return
+    if (!isOwner) { setLastError('Only owner can add questions.'); return }
     await ensureHederaTestnet()
     try {
       setTxPending(true)
       setLastError('')
-      const outcomeArr = newOutcomes.split(',').map(s => s.trim()).filter(Boolean)
-      const end = BigInt(newEndTime || Math.floor(Date.now()/1000) + 3600)
-      const tx = await contract.addQuestion(newQ, outcomeArr, end)
-      const receipt = await tx.wait()
-      console.log('Question added', receipt)
-      // Try refetch the latest counter to hint the new ID
-      try { const counter = await contract.questionCounter(); setQuestionCount(Number(counter)); setQuestionId(String(counter)) } catch {}
+      const outcomeArr = String(outcomesCsv || '').split(',').map(s => s.trim()).filter(Boolean)
+      const end = BigInt(endTime || Math.floor(Date.now()/1000) + 3600)
+      const tx = await contract.addQuestion(String(question || '').trim(), outcomeArr, end)
+      await tx.wait()
+      await fetchAllQuestions()
+      try { const counter = await contract.questionCounter(); setQuestionCount(Number(counter)) } catch {}
     } catch (e) {
-      console.error(e)
       setLastError(normalizeErr(e))
     } finally {
       setTxPending(false)
@@ -287,6 +354,61 @@ export default function PredictionMarket() {
     return () => { cancelled = true }
   }, [contract])
 
+  // Load all questions when contract/readContract is ready
+  useEffect(() => {
+    if (contract || readContract) {
+      fetchAllQuestions().catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contract, readContract])
+
+  const isOwner = useMemo(() => {
+    if (!account || !oracleAddr) return false
+    return account.toLowerCase() === oracleAddr.toLowerCase()
+  }, [account, oracleAddr])
+
+  // Map UI action placePrediction(questionId, option) -> placeBet(questionId, outcomeIndex, amount)
+  async function handlePredict(questionId, optionIndex, amountHBAR) {
+    if (!contract || !signer) { setLastError('Connect wallet first.'); return }
+    await ensureHederaTestnet()
+    try {
+      setTxPending(true)
+      setLastError('')
+      const amountWei = ethers.parseUnits(String(amountHBAR || '0').trim(), 18)
+      if (amountWei <= 0n) throw new Error('Enter an amount greater than 0 (in HBAR).')
+      const qId = BigInt(questionId)
+      const oIdx = BigInt(optionIndex)
+      const iface = new ethers.Interface(contractABI)
+      const dataHex = iface.encodeFunctionData('placeBet', [qId, oIdx, amountWei])
+      const txRequest = { to: CONTRACT_ADDRESS, data: dataHex, value: ethers.toBeHex(amountWei), gasLimit: 300000n }
+      const sent = await signer.sendTransaction(txRequest)
+      await sent.wait()
+      await fetchAllQuestions()
+    } catch (e) {
+      setLastError(normalizeErr(e))
+    } finally {
+      setTxPending(false)
+    }
+  }
+
+  // Map UI action resolveQuestion(questionId, winner) -> resolveMarket
+  async function handleResolve(questionId, winnerIdx) {
+    if (!contract || !signer) { setLastError('Connect wallet first.'); return }
+    if (!isOwner) { setLastError('Only owner can resolve.'); return }
+    await ensureHederaTestnet()
+    try {
+      setTxPending(true)
+      setLastError('')
+      const tx = await contract.resolveMarket(BigInt(questionId), BigInt(winnerIdx))
+      await tx.wait()
+      await fetchAllQuestions()
+    } catch (e) {
+      setLastError(normalizeErr(e))
+    } finally {
+      setTxPending(false)
+    }
+  }
+
   return (
     <section className="mx-auto max-w-4xl px-6 pt-16">
       <motion.h2 initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{duration:0.5}} className="text-2xl md:text-3xl font-semibold">
@@ -300,111 +422,36 @@ export default function PredictionMarket() {
           {lastError}
         </div>
       )}
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/60">Wallet</div>
-          <div className="mt-1 text-white text-sm">{account ? `${account.slice(0,6)}…${account.slice(-4)}` : 'Not connected'}</div>
-          <div className="mt-1 text-white/70 text-xs">ChainId: {chainId || '—'}</div>
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/60">Contract</div>
-          <div className="mt-1 text-white text-sm break-all">ID: {HEDERA_CONTRACT_ID}</div>
-          <div className="mt-1 text-white/70 text-xs break-all">EVM: {CONTRACT_ADDRESS}</div>
-          <div className="mt-2 text-xs">
-            <span className={contract ? 'text-green-400' : 'text-red-400'}>
-              {contract ? 'Ready' : 'Awaiting valid ABI/address/signer'}
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-white/70">Code on Hedera: {hasCode == null ? 'checking…' : hasCode ? 'yes' : 'no'}</div>
-          <div className="mt-2 text-xs text-white/70 break-all">Oracle: {oracleAddr || '—'}</div>
-          <div className="mt-1 text-xs text-white/70">questionCounter: {questionCount ?? '—'}</div>
-        </div>
-      </div>
-      <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2">
-        <motion.div initial={{opacity:0,y:10}} whileInView={{opacity:1,y:0}} viewport={{once:true}} className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/60">Query Market</div>
-          <form className="mt-3 space-y-2" onSubmit={(e)=>{e.preventDefault(); fetchMarket(questionId)}}>
-            <label className="block text-xs text-white/60">Question ID</label>
-            <input value={questionId} onChange={(e)=>setQuestionId(e.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <button className="mt-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-95 disabled:opacity-50" disabled={!contract || loadingMarket}>
-              {loadingMarket ? 'Loading…' : 'Fetch'}
-            </button>
-          </form>
-          {market && (
-            <div className="mt-4 text-sm">
-              <div className="text-white">{market.question}</div>
-              <div className="mt-1 text-white/70">End time: {market.endTime} (unix)</div>
-              <div className="mt-1 text-white/70">Resolved: {String(market.marketResolved)}</div>
-              <div className="mt-1 text-white/70">Winning Outcome: {market.winningOutcome}</div>
-              <div className="mt-1 text-white/70">Total Pool: {market.totalMarketPool}</div>
-              {market.outcomes ? (
-                <>
-                  <div className="mt-2 text-white/80">Outcomes:</div>
-                  <ul className="mt-1 list-disc pl-4 text-white/80">
-                    {(market.outcomes||[]).map((o, idx)=> (
-                      <li key={idx}>{idx}. {o.name} — {o.totalBetAmount}</li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <div className="mt-2 text-xs text-white/60">Outcomes could not be decoded from RPC; consider using a different RPC or adding a lighter view to the contract.</div>
-              )}
-            </div>
+      {/* Polymarket-style tabs */}
+      <div className="mt-6">
+        <div className="flex items-center gap-4 border-b border-white/10">
+          <button
+            className={`pb-2 text-sm ${activeTab==='markets' ? 'text-accent border-b-2 border-accent' : 'text-white/60'}`}
+            onClick={()=>setActiveTab('markets')}
+          >Markets</button>
+          {isOwner && (
+            <button
+              className={`pb-2 text-sm ${activeTab==='resolve' ? 'text-accent border-b-2 border-accent' : 'text-white/60'}`}
+              onClick={()=>setActiveTab('resolve')}
+            >Admin</button>
           )}
-        </motion.div>
+          <div className="flex-1" />
+          {oracleAddr && (
+            <div className="text-xs text-white/60">Owner: <span className="text-white/80">{oracleAddr.slice(0,6)}…{oracleAddr.slice(-4)}</span></div>
+          )}
+        </div>
 
-        <motion.div initial={{opacity:0,y:10}} whileInView={{opacity:1,y:0}} viewport={{once:true}} className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/60">Add Question</div>
-          <form className="mt-3 space-y-2" onSubmit={onAddQuestion}>
-            <label className="block text-xs text-white/60">Question</label>
-            <input value={newQ} onChange={(e)=>setNewQ(e.target.value)} placeholder="Will ETH > $5k by EOY?" className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <label className="block text-xs text-white/60">Outcome names (comma-separated)</label>
-            <input value={newOutcomes} onChange={(e)=>setNewOutcomes(e.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <label className="block text-xs text-white/60">End time (unix seconds)</label>
-            <input value={newEndTime} onChange={(e)=>setNewEndTime(e.target.value)} placeholder={`${Math.floor(Date.now()/1000) + 3600}`} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            {!account && <div className="text-xs text-white/50">Connect wallet to create questions.</div>}
-            <button className="mt-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-95 disabled:opacity-50" disabled={!contract || txPending || !account}>
-              {txPending ? 'Submitting…' : 'Create'}
-            </button>
-          </form>
-        </motion.div>
-
-        <motion.div initial={{opacity:0,y:10}} whileInView={{opacity:1,y:0}} viewport={{once:true}} className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/60">Place Bet</div>
-          <form className="mt-3 space-y-2" onSubmit={onPlaceBet}>
-            <label className="block text-xs text-white/60">Question ID</label>
-            <input value={questionId} onChange={(e)=>setQuestionId(e.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <label className="block text-xs text-white/60">Outcome Index</label>
-            <input value={betOutcomeIndex} onChange={(e)=>setBetOutcomeIndex(e.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <label className="block text-xs text-white/60">Amount (HBAR/ETH units)</label>
-            <input value={betAmount} onChange={(e)=>setBetAmount(e.target.value)} placeholder="0.1" className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <button className="mt-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-95 disabled:opacity-50" disabled={!contract || txPending}>
-              {txPending ? 'Submitting…' : 'Bet'}
-            </button>
-          </form>
-        </motion.div>
-
-        <motion.div initial={{opacity:0,y:10}} whileInView={{opacity:1,y:0}} viewport={{once:true}} className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/60">Resolve / Claim</div>
-          <form className="mt-3 space-y-2" onSubmit={onResolve}>
-            <label className="block text-xs text-white/60">Question ID</label>
-            <input value={questionId} onChange={(e)=>setQuestionId(e.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <label className="block text-xs text-white/60">Winning Outcome Index</label>
-            <input value={betOutcomeIndex} onChange={(e)=>setBetOutcomeIndex(e.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-accent/60" />
-            <div className="flex gap-2">
-              <button type="submit" className="mt-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-95 disabled:opacity-50" disabled={!contract || txPending || !account || (oracleAddr && account && account.toLowerCase() !== oracleAddr.toLowerCase())}>
-                {txPending ? 'Submitting…' : 'Resolve'}
-              </button>
-              <button type="button" onClick={onClaim} className="mt-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white hover:text-white/90 disabled:opacity-50" disabled={!contract || txPending}>
-                Claim Winnings
-              </button>
-            </div>
-            {account && oracleAddr && account.toLowerCase() !== oracleAddr.toLowerCase() && (
-              <div className="text-xs text-yellow-300/80 mt-1">Only oracle can resolve markets.</div>
-            )}
-          </form>
-        </motion.div>
+        <div className="mt-4">
+          {activeTab === 'markets' && (
+            <PredictionGrid questions={questions} onPredict={handlePredict} loading={loadingQuestions} />
+          )}
+          {activeTab === 'resolve' && (
+            <ResolveTab questions={questions} isOwner={isOwner} onResolve={handleResolve} />
+          )}
+        </div>
       </div>
+
+      {/* Removed advanced panels from Markets to keep user actions focused on cards */}
     </section>
   )
 }

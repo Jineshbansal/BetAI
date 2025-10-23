@@ -4,13 +4,14 @@
     "@langchain/core": "^0.3.78",
     "@langchain/openai": "^0.6.16",
     "dotenv": "^17.2.3",
+    "flask": "^0.2.10",
+    "flask-cors": "^0.0.1",
     "hedera-agent-kit": "^3.4.0",
     "langchain": "^0.3.36"
   },
   "name": "backend",
   "version": "1.0.0",
   "main": "index.js",
-  "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

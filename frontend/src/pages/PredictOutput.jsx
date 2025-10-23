@@ -1,7 +1,16 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
+import { useWallet } from '../contexts/WalletContext'
+import { ethers } from 'ethers'
+import {
+  Client,
+  ContractExecuteTransaction,
+  Hbar,
+  ContractFunctionParameters
+} from "@hashgraph/sdk";
 
 export default function PredictOutput() {
+  const { signer, account } = useWallet()
   const [riskLevel, setRiskLevel] = useState('medium')
   const [dataSources, setDataSources] = useState([])
   const [selectedQuestion, setSelectedQuestion] = useState('')
@@ -9,6 +18,17 @@ export default function PredictOutput() {
   const [spendingMode, setSpendingMode] = useState('manual')
   const [agentAddress, setAgentAddress] = useState('')
   const [spendingLimit, setSpendingLimit] = useState('')
+  
+  // Signal and autonomous execution state
+  const [currentSignal, setCurrentSignal] = useState(null)
+  const [isAutonomousActive, setIsAutonomousActive] = useState(false)
+  const [autonomousStatus, setAutonomousStatus] = useState('idle') // idle, running, stopped
+  const [nextSignalTime, setNextSignalTime] = useState(null)
+  const [betAmount, setBetAmount] = useState('10') // Default bet amount in HBAR
+  const [questionId, setQuestionId] = useState(1) // Default question ID for betting
+  
+  const intervalRef = useRef(null)
+  const BACKEND_URL = 'http://localhost:5000'
 
   // Available data sources
   const availableDataSources = [
@@ -49,31 +69,261 @@ export default function PredictOutput() {
     setSelectedQuestion('')
   }
 
-  const handleGenerateSignal = () => {
-    // Generate prediction/signal based on configuration
-    const predictionConfig = {
+  // Function to fetch signal from backend
+  const fetchSignal = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/generate-signal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: selectedQuestion || customQuestion,
+          dataSources,
       riskLevel,
-      dataSources,
-      question: selectedQuestion || customQuestion,
-      spendingMode,
-      agentAddress: spendingMode === 'auto' ? agentAddress : null,
-      spendingLimit: spendingMode === 'auto' ? spendingLimit : null
+          marketPrice: 0.65 // Default market price, can be made dynamic
+        })
+      })
+
+      const data = await response.json()
+      
+      if (data.success) {
+        setCurrentSignal(data.signal)
+        return data.signal
+      } else {
+        console.error('Failed to generate signal:', data.error)
+        return null
+      }
+    } catch (error) {
+      console.error('Error fetching signal:', error)
+      return null
+    }
+  }
+  // Function to validate spending limit
+  const validateSpendingLimit = (betAmountHBAR) => {
+    if (!spendingLimit || spendingLimit === '') {
+      return true // No limit set
     }
     
-    console.log('Generating prediction with config:', predictionConfig)
+    // Convert HBAR to USD (HBAR ≈ $0.17)
+    const HBAR_PRICE_USD = 0.17
+    const betAmountUSD = parseFloat(betAmountHBAR) * HBAR_PRICE_USD
+    const limitUSD = parseFloat(spendingLimit)
     
-    // Here you would integrate with your AI/ML backend to generate the signal
-    // For now, we'll simulate a response
-    const simulatedPrediction = {
-      asset: 'ETH/USDT',
-      direction: 'BUY',
-      confidence: '85%',
-      timeframe: '24 hours',
-      expectedReturn: '+5-8%',
-      riskAssessment: 'Medium-High'
+    if (betAmountUSD > limitUSD) {
+      alert(`Bet amount (${betAmountHBAR} HBAR ≈ $${betAmountUSD.toFixed(2)}) exceeds spending limit ($${limitUSD.toFixed(2)})`)
+      return false
     }
     
-    alert(`Prediction Generated!\n\nAsset: ${simulatedPrediction.asset}\nSignal: ${simulatedPrediction.direction}\nConfidence: ${simulatedPrediction.confidence}\nTimeframe: ${simulatedPrediction.timeframe}\nExpected Return: ${simulatedPrediction.expectedReturn}\nRisk: ${simulatedPrediction.riskAssessment}`)
+    return true
+  }
+
+  // Function to check wallet balance
+  const checkBalance = async () => {
+    if (!signer) return null
+    
+    try {
+      const balance = await signer.provider.getBalance(await signer.getAddress())
+      // Convert from tinybars to HBAR
+      const balanceHBAR = parseFloat(ethers.formatUnits(balance, 8))
+      return balanceHBAR
+    } catch (error) {
+      console.error('Error checking balance:', error)
+      return null
+    }
+  }
+
+  // Function to place bet on contract
+  const placeBet = async (outcomeIndex) => {
+    if (!signer) {
+      alert('Please connect your wallet first')
+      return false
+    }
+
+    // Validate spending limit
+    if (!validateSpendingLimit(betAmount)) {
+      return false
+    }
+
+    // Check wallet balance
+    const balance = await checkBalance()
+    if (balance !== null) {
+      const betAmountNum = parseFloat(betAmount)
+      const estimatedGasCost = 0.1 // Rough estimate for gas in HBAR
+      const totalNeeded = betAmountNum + estimatedGasCost
+      
+      console.log(`Wallet balance: ${balance.toFixed(2)} HBAR`)
+      console.log(`Bet amount: ${betAmountNum} HBAR`)
+      console.log(`Estimated gas: ${estimatedGasCost} HBAR`)
+      console.log(`Total needed: ${totalNeeded} HBAR`)
+      
+      if (balance < totalNeeded) {
+        alert(`Insufficient balance!\n\nYour balance: ${balance.toFixed(2)} HBAR\nBet amount: ${betAmountNum} HBAR\nEstimated gas: ${estimatedGasCost} HBAR\nTotal needed: ${totalNeeded} HBAR\n\nPlease reduce bet amount or add more HBAR to your wallet.`)
+        return false
+      }
+    }
+
+
+    try {
+      // ✅ Connect to Hedera testnet
+      const client = Client.forTestnet();
+  
+      client.setOperator(process.env.MY_ACCOUNT_ID, process.env.MY_PRIVATE_KEY);
+  
+      // Convert HBAR to tinybars (1 HBAR = 100,000,000 tinybars)
+      const amountTinybars = Hbar.from(betAmount).toTinybars();
+  
+      console.log(`Placing bet of ${betAmount} HBAR (${amountTinybars} tinybars)`);
+  
+      // ✅ Build the transaction to call the contract function
+      const tx = new ContractExecuteTransaction()
+        .setContractId('0.0.7100616') // NOT address — use Hedera Contract ID (e.g., "0.0.123456")
+        .setGas(200000) // adjust based on function complexity
+        .setPayableAmount(Hbar.fromTinybars(amountTinybars))
+        .setFunction(
+          "placeBet",
+          new ContractFunctionParameters()
+            .addUint256(questionId)
+            .addUint256(outcomeIndex)
+            .addUint256(amountTinybars)
+        );
+  
+      // Submit the transaction
+      const submitTx = await tx.execute(client);
+  
+      // Get the receipt to confirm success
+      const receipt = await submitTx.getReceipt(client);
+      console.log("✅ Transaction status:", receipt.status.toString());
+  
+      if (receipt.status.toString() === "SUCCESS") {
+        alert("Bet placed successfully!");
+        return true;
+      } else {
+        alert(`Transaction failed: ${receipt.status.toString()}`);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error placing bet:', error)
+      
+      // Provide more helpful error messages
+      if (error.code === 'INSUFFICIENT_FUNDS') {
+        alert(`Insufficient funds for transaction.\n\nYou need:\n- ${betAmount} HBAR for the bet\n- Additional HBAR for gas fees\n\nTry reducing the bet amount or ensure you have enough HBAR for both the bet and gas fees.`)
+      } else if (error.message.includes('gas')) {
+        alert(`Gas estimation failed. This might be due to:\n- Insufficient funds for gas\n- Contract not deployed\n- Invalid question ID\n\nError: ${error.message}`)
+      } else {
+        alert('Failed to place bet: ' + error.message)
+      }
+      return false
+    }
+  }
+
+  // Function to handle autonomous execution
+  const startAutonomousExecution = async () => {
+    if (!selectedQuestion && !customQuestion) {
+      alert('Please select or enter an analysis question first')
+      return
+    }
+
+    if (spendingMode !== 'auto') {
+      alert('Please select autonomous execution mode first')
+      return
+    }
+
+    setIsAutonomousActive(true)
+    setAutonomousStatus('running')
+    
+    // Fetch initial signal
+    const signal = await fetchSignal()
+    
+    if (signal && signal.direction === 'BUY') {
+      // Place bet for YES outcome (index 0) and stop
+      const betPlaced = await placeBet(0)
+      if (betPlaced) {
+        setAutonomousStatus('completed')
+        setIsAutonomousActive(false)
+        alert('Bet placed successfully! Autonomous trading completed for this question.')
+        return
+      }
+    } else if (signal && signal.direction === 'SELL') {
+      // Place bet for NO outcome (index 1) and stop
+      const betPlaced = await placeBet(1)
+      if (betPlaced) {
+        setAutonomousStatus('completed')
+        setIsAutonomousActive(false)
+        alert('Bet placed successfully! Autonomous trading completed for this question.')
+        return
+      }
+    }
+
+    // If we get HOLD, continue monitoring until we get BUY/SELL
+    // Set up interval for continuous signal fetching (1 hour = 3600000 ms)
+    intervalRef.current = setInterval(async () => {
+      const newSignal = await fetchSignal()
+      
+      if (newSignal && newSignal.direction === 'BUY') {
+        const betPlaced = await placeBet(0)
+        if (betPlaced) {
+          // Stop monitoring after successful bet placement
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+          setAutonomousStatus('completed')
+          setIsAutonomousActive(false)
+          setNextSignalTime(null)
+          alert('Bet placed successfully! Autonomous trading completed for this question.')
+        }
+      } else if (newSignal && newSignal.direction === 'SELL') {
+        const betPlaced = await placeBet(1)
+        if (betPlaced) {
+          // Stop monitoring after successful bet placement
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+          setAutonomousStatus('completed')
+          setIsAutonomousActive(false)
+          setNextSignalTime(null)
+          alert('Bet placed successfully! Autonomous trading completed for this question.')
+        }
+      }
+      // If HOLD, continue monitoring (don't place bet, don't stop)
+      
+      // Update next signal time
+      setNextSignalTime(Date.now() + 3600000)
+    }, 3600000) // 1 hour interval
+
+    // Set initial next signal time
+    setNextSignalTime(Date.now() + 3600000)
+  }
+
+  // Function to stop autonomous execution
+  const stopAutonomousExecution = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    setIsAutonomousActive(false)
+    setAutonomousStatus('stopped')
+    setNextSignalTime(null)
+  }
+
+  // Cleanup on component unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
+    }
+  }, [])
+
+  const handleGenerateSignal = async () => {
+    if (spendingMode === 'auto') {
+      // Start autonomous execution
+      await startAutonomousExecution()
+    } else {
+      // Manual mode - just fetch and display signal
+      const signal = await fetchSignal()
+      if (signal) {
+        alert(`Signal Generated!\n\nDirection: ${signal.direction}\nConfidence: ${(signal.confidence * 100).toFixed(1)}%\nReason: ${signal.reason}`)
+      }
+    }
   }
 
   return (
@@ -292,6 +542,128 @@ export default function PredictOutput() {
         </div>
       </motion.div>
 
+      {/* Autonomous Execution Controls */}
+      {spendingMode === 'auto' && (
+        <motion.div 
+          initial={{opacity:0,y:8}} 
+          animate={{opacity:1,y:0}} 
+          transition={{delay:0.55}}
+          className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
+        >
+          <h3 className="text-lg font-semibold mb-4">5. Autonomous Execution Settings</h3>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm text-white/60 mb-2 block">
+                  Bet Amount (HBAR):
+                </label>
+                <input
+                  type="number"
+                  value={betAmount}
+                  onChange={(e) => setBetAmount(e.target.value)}
+                  placeholder="10"
+                  step="0.001"
+                  min="0.001"
+                  className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-blue-500 focus:outline-none"
+                />
+                <div className="text-xs text-white/50 mt-1">
+                  ≈ ${(parseFloat(betAmount || 0) * 0.17).toFixed(2)} USD
+                </div>
+              </div>
+              
+              <div>
+                <label className="text-sm text-white/60 mb-2 block">
+                  Question ID (Market):
+                </label>
+                <input
+                  type="number"
+                  value={questionId}
+                  onChange={(e) => setQuestionId(parseInt(e.target.value))}
+                  placeholder="1"
+                  min="1"
+                  className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Autonomous Status Display */}
+            <div className="mt-4 p-4 rounded-lg bg-white/5 border border-white/10">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-white/60">Autonomous Status:</span>
+                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                  autonomousStatus === 'running' ? 'bg-green-500/20 text-green-300' :
+                  autonomousStatus === 'completed' ? 'bg-blue-500/20 text-blue-300' :
+                  autonomousStatus === 'stopped' ? 'bg-red-500/20 text-red-300' :
+                  'bg-gray-500/20 text-gray-300'
+                }`}>
+                  {autonomousStatus.toUpperCase()}
+                </span>
+              </div>
+              
+              {currentSignal && (
+                <div className="text-sm text-white/80 mb-2">
+                  <div>Last Signal: <span className="font-medium">{currentSignal.direction}</span></div>
+                  <div>Confidence: <span className="font-medium">{(currentSignal.confidence * 100).toFixed(1)}%</span></div>
+                  <div>Reason: <span className="text-white/60">{currentSignal.reason}</span></div>
+                </div>
+              )}
+              
+              {spendingMode === 'auto' && agentAddress && spendingLimit && (
+                <div className="text-sm text-white/80 mb-2 p-2 bg-blue-500/10 rounded">
+                  <div>Agent Wallet: <span className="font-mono text-xs">{agentAddress.slice(0, 6)}...{agentAddress.slice(-4)}</span></div>
+                  <div>Spending Limit: <span className="font-medium">${spendingLimit}</span></div>
+                  <div>Current Bet: <span className="font-medium">{betAmount} HBAR ≈ ${(parseFloat(betAmount) * 0.17).toFixed(2)}</span></div>
+                </div>
+              )}
+              
+              {nextSignalTime && (
+                <div className="text-sm text-white/60">
+                  Next signal in: {Math.max(0, Math.floor((nextSignalTime - Date.now()) / 60000))} minutes
+                </div>
+              )}
+            </div>
+
+            {/* Control Buttons */}
+            <div className="flex gap-3">
+              {autonomousStatus === 'completed' ? (
+                <div className="text-center">
+                  <div className="text-green-300 text-sm mb-2">✅ Bet placed successfully!</div>
+                  <button
+                    onClick={() => {
+                      setAutonomousStatus('idle')
+                      setCurrentSignal(null)
+                      setNextSignalTime(null)
+                    }}
+                    className="px-4 py-2 rounded-lg font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  >
+                    Reset for New Question
+                  </button>
+                </div>
+              ) : !isAutonomousActive ? (
+                <button
+                  onClick={startAutonomousExecution}
+                  disabled={!selectedQuestion && !customQuestion}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    (!selectedQuestion && !customQuestion)
+                      ? 'bg-gray-600 cursor-not-allowed text-white/50'
+                      : 'bg-green-600 hover:bg-green-700 text-white'
+                  }`}
+                >
+                  Start Autonomous Trading
+                </button>
+              ) : (
+                <button
+                  onClick={stopAutonomousExecution}
+                  className="px-4 py-2 rounded-lg font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+                >
+                  Stop Autonomous Trading
+                </button>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Generate Signal Button */}
       <motion.div 
         initial={{opacity:0,y:8}} 
@@ -305,14 +677,18 @@ export default function PredictOutput() {
           className={`w-full font-semibold py-3 px-6 rounded-lg transition-colors ${
             (!selectedQuestion && !customQuestion)
               ? 'bg-gray-600 cursor-not-allowed text-white/50'
+              : spendingMode === 'auto' 
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : 'bg-green-600 hover:bg-green-700 text-white'
           }`}
         >
-          Generate Trading Signal
+          {spendingMode === 'auto' ? 'Start Autonomous Trading' : 'Generate Trading Signal'}
         </button>
         <div className="text-center text-white/50 text-sm mt-3">
           {!selectedQuestion && !customQuestion 
             ? 'Please select or enter an analysis question to generate signals'
+            : spendingMode === 'auto'
+              ? 'AI will monitor signals and place ONE bet when BUY/SELL signal is detected'
             : 'AI will analyze selected data sources and generate profitable trading signals'
           }
         </div>
@@ -330,7 +706,7 @@ export default function PredictOutput() {
           <li>• AI analyzes selected data sources in real-time</li>
           <li>• Generates predictions based on your risk tolerance</li>
           <li>• Provides specific buy/sell/hold recommendations</li>
-          <li>• {spendingMode === 'auto' ? 'Automatically executes trades within spending limit' : 'You manually execute recommended trades'}</li>
+          <li>• {spendingMode === 'auto' ? 'Monitors signals every hour and places ONE bet when BUY/SELL is detected' : 'You manually execute recommended trades'}</li>
         </ul>
       </motion.div>
     </section>

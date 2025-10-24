@@ -5,6 +5,8 @@ import { useWallet } from '../contexts/WalletContext'
 import { CONTRACT_ADDRESS, contractABI, HEDERA_CONTRACT_ID, HEDERA_TESTNET_CHAIN_ID_HEX, HEDERA_TESTNET_RPC } from '../contracts/config'
 import PredictionGrid from '../components/PredictionGrid'
 import ResolveTab from '../components/ResolveTab'
+// Hedera SDK for direct HBAR txs (normal method)
+import { Client, ContractExecuteTransaction, Hbar, ContractFunctionParameters, PrivateKey, AccountId } from '@hashgraph/sdk'
 
 export default function PredictionMarket() {
   const { account, signer, chainId } = useWallet()
@@ -250,14 +252,43 @@ export default function PredictionMarket() {
     try {
       setTxPending(true)
       setLastError('')
+      const qStr = String(question || '').trim()
       const outcomeArr = String(outcomesCsv || '').split(',').map(s => s.trim()).filter(Boolean)
-      const end = BigInt(endTime || Math.floor(Date.now()/1000) + 3600)
-      const tx = await contract.addQuestion(String(question || '').trim(), outcomeArr, end)
-      await tx.wait()
+      // Validation
+      if (!qStr) throw new Error('Question cannot be empty')
+      if (!outcomeArr.length) throw new Error('Provide at least one outcome (e.g., Yes,No)')
+      const nowSec = Math.floor(Date.now()/1000)
+      const endSec = Number(endTime) > 0 ? Number(endTime) : (nowSec + 3600)
+      if (endSec <= nowSec) throw new Error('End time must be in the future (unix seconds)')
+
+      // Populate via getFunction (ethers v6) with fallback to direct call
+      let txResponse
+      try {
+        const fn = contract.getFunction ? contract.getFunction('addQuestion') : null
+        if (fn && fn.populateTransaction) {
+          const populated = await fn.populateTransaction(qStr, outcomeArr, BigInt(endSec))
+          txResponse = await signer.sendTransaction({
+            ...populated,
+            gasLimit: populated.gasLimit ?? 500000n
+          })
+        } else {
+          // Fallback direct call
+          txResponse = await contract.addQuestion(qStr, outcomeArr, BigInt(endSec), { gasLimit: 500000n })
+        }
+      } catch (popErr) {
+        // If populate not supported, fallback direct call
+        txResponse = await contract.addQuestion(qStr, outcomeArr, BigInt(endSec), { gasLimit: 500000n })
+      }
+      await txResponse.wait()
       await fetchAllQuestions()
       try { const counter = await contract.questionCounter(); setQuestionCount(Number(counter)) } catch {}
     } catch (e) {
-      setLastError(normalizeErr(e))
+      const msg = normalizeErr(e)
+      if (/circuit breaker/i.test(msg)) {
+        setLastError('RPC circuit breaker is open. Please wait a minute and try again, or switch the Hedera Testnet RPC in your wallet settings.')
+      } else {
+        setLastError(msg)
+      }
     } finally {
       setTxPending(false)
     }
@@ -367,25 +398,72 @@ export default function PredictionMarket() {
     return account.toLowerCase() === oracleAddr.toLowerCase()
   }, [account, oracleAddr])
 
-  // Map UI action placePrediction(questionId, option) -> placeBet(questionId, outcomeIndex, amount)
-  async function handlePredict(questionId, optionIndex, amountHBAR) {
-    if (!contract || !signer) { setLastError('Connect wallet first.'); return }
-    await ensureHederaTestnet()
+  // Map UI action from cards -> Hedera SDK payable call (HBAR, not ETH)
+  async function handlePredict(qId, optionIndex, amountHBAR) {
     try {
       setTxPending(true)
       setLastError('')
-      const amountWei = ethers.parseUnits(String(amountHBAR || '0').trim(), 18)
-      if (amountWei <= 0n) throw new Error('Enter an amount greater than 0 (in HBAR).')
-      const qId = BigInt(questionId)
-      const oIdx = BigInt(optionIndex)
-      const iface = new ethers.Interface(contractABI)
-      const dataHex = iface.encodeFunctionData('placeBet', [qId, oIdx, amountWei])
-      const txRequest = { to: CONTRACT_ADDRESS, data: dataHex, value: ethers.toBeHex(amountWei), gasLimit: 300000n }
-      const sent = await signer.sendTransaction(txRequest)
-      await sent.wait()
+      const amtStr = String(amountHBAR || '').trim()
+      if (!amtStr || Number(amtStr) <= 0) throw new Error('Enter an amount greater than 0 (in HBAR).')
+
+      // Hedera client using operator keys (dev method, same as PredictOutput.jsx)
+      const ACC = String(import.meta.env.VITE_MY_ACCOUNT_ID || '').trim()
+      const KEY = String(import.meta.env.VITE_MY_PRIVATE_KEY || '').trim()
+      if (!ACC || !KEY) {
+        throw new Error('Missing Hedera operator keys. Create frontend/.env.local with VITE_MY_ACCOUNT_ID and VITE_MY_PRIVATE_KEY, then restart the dev server.')
+      }
+      const client = Client.forTestnet()
+      let priv
+      try {
+        const keyNo0x = KEY.startsWith('0x') ? KEY.slice(2) : KEY
+        if (/^0x[0-9a-fA-F]{64}$/.test(KEY)) {
+          // ECDSA secp256k1 raw hex
+          priv = PrivateKey.fromStringECDSA(KEY)
+        } else if (/^(302e|302d|302c)/i.test(keyNo0x)) {
+          // DER-encoded Ed25519 private key (hex)
+          priv = PrivateKey.fromStringDer(keyNo0x)
+        } else if (/^[0-9a-fA-F]{64}$/.test(KEY)) {
+          // Raw 32-byte Ed25519 hex (rare). Prefer DER but support this.
+          priv = PrivateKey.fromStringED25519(KEY)
+        } else {
+          // Fallback to generic (may still warn)
+          priv = PrivateKey.fromString(KEY)
+        }
+      } catch (e) {
+        throw new Error('Private key format not recognized. Use 0x<64-hex> for ECDSA, 302e.. DER hex for Ed25519, or paste the DER string provided by your wallet.')
+      }
+      client.setOperator(AccountId.fromString(ACC), priv)
+
+      // Convert HBAR to tinybars (1 HBAR = 100,000,000 tinybars)
+      const amountTinybars = Hbar.from(amtStr).toTinybars()
+
+      const tx = new ContractExecuteTransaction()
+        .setContractId(HEDERA_CONTRACT_ID)
+        .setGas(200000)
+        .setPayableAmount(Hbar.fromTinybars(amountTinybars))
+        .setFunction(
+          'placeBet',
+          new ContractFunctionParameters()
+            .addUint256(Number(qId))
+            .addUint256(Number(optionIndex))
+            .addUint256(amountTinybars)
+        )
+
+  const submit = await tx.execute(client)
+  const receipt = await submit.getReceipt(client)
+      const status = receipt.status?.toString?.() || String(receipt.status)
+      if (!status.includes('SUCCESS')) throw new Error(`Transaction failed: ${status}`)
+
       await fetchAllQuestions()
     } catch (e) {
-      setLastError(normalizeErr(e))
+      const msg = normalizeErr(e)
+      if (/INVALID_SIGNATURE/i.test(msg)) {
+        setLastError('Invalid signature: The provided private key does not match the on-file key for account ' + ACC + '. Use the correct key for this account, or switch to the account that corresponds to this private key (ECDSA vs Ed25519 mismatch).')
+      } else if (/circuit breaker/i.test(msg)) {
+        setLastError('RPC circuit breaker is open. Please wait and try again, or switch RPC.')
+      } else {
+        setLastError(msg)
+      }
     } finally {
       setTxPending(false)
     }
@@ -446,7 +524,7 @@ export default function PredictionMarket() {
             <PredictionGrid questions={questions} onPredict={handlePredict} loading={loadingQuestions} />
           )}
           {activeTab === 'resolve' && (
-            <ResolveTab questions={questions} isOwner={isOwner} onResolve={handleResolve} />
+            <ResolveTab questions={questions} isOwner={isOwner} onResolve={handleResolve} onAddQuestion={handleAddQuestion} />
           )}
         </div>
       </div>

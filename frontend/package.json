@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@hashgraph/sdk": "^2.75.0",
+    "@hashgraph/hashconnect": "^1.10.3",
     "dotenv": "^17.2.3",
     "ethers": "^6.13.4",
     "framer-motion": "^11.5.5",

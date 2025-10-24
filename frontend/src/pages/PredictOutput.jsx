@@ -6,7 +6,9 @@ import {
   Client,
   ContractExecuteTransaction,
   Hbar,
-  ContractFunctionParameters
+  ContractFunctionParameters,
+  PrivateKey,
+  AccountId
 } from "@hashgraph/sdk";
 
 export default function PredictOutput() {
@@ -165,10 +167,35 @@ export default function PredictOutput() {
 
 
     try {
-      // ✅ Connect to Hedera testnet
+      // ✅ Connect to Hedera testnet (use Vite env vars in frontend)
       const client = Client.forTestnet();
-  
-      client.setOperator(process.env.MY_ACCOUNT_ID, process.env.MY_PRIVATE_KEY);
+      const ACC = String(import.meta.env.VITE_MY_ACCOUNT_ID || '').trim()
+      const KEY = String(import.meta.env.VITE_MY_PRIVATE_KEY || '').trim()
+      if (!ACC || !KEY) {
+        alert('Missing Hedera operator keys. Create frontend/.env.local with VITE_MY_ACCOUNT_ID and VITE_MY_PRIVATE_KEY, then restart the dev server.')
+        return false
+      }
+      let priv
+      try {
+        const keyNo0x = KEY.startsWith('0x') ? KEY.slice(2) : KEY
+        if (/^0x[0-9a-fA-F]{64}$/.test(KEY)) {
+          // ECDSA secp256k1 raw hex
+          priv = PrivateKey.fromStringECDSA(KEY)
+        } else if (/^(302e|302d|302c)/i.test(keyNo0x)) {
+          // DER-encoded Ed25519 private key (hex)
+          priv = PrivateKey.fromStringDer(keyNo0x)
+        } else if (/^[0-9a-fA-F]{64}$/.test(KEY)) {
+          // Raw 32-byte Ed25519 hex
+          priv = PrivateKey.fromStringED25519(KEY)
+        } else {
+          // Fallback to generic
+          priv = PrivateKey.fromString(KEY)
+        }
+      } catch (e) {
+        alert('Private key format not recognized. Use 0x<64-hex> for ECDSA or 302e.. DER hex for Ed25519.')
+        return false
+      }
+      client.setOperator(AccountId.fromString(ACC), priv);
   
       // Convert HBAR to tinybars (1 HBAR = 100,000,000 tinybars)
       const amountTinybars = Hbar.from(betAmount).toTinybars();
@@ -210,6 +237,8 @@ export default function PredictOutput() {
         alert(`Insufficient funds for transaction.\n\nYou need:\n- ${betAmount} HBAR for the bet\n- Additional HBAR for gas fees\n\nTry reducing the bet amount or ensure you have enough HBAR for both the bet and gas fees.`)
       } else if (error.message.includes('gas')) {
         alert(`Gas estimation failed. This might be due to:\n- Insufficient funds for gas\n- Contract not deployed\n- Invalid question ID\n\nError: ${error.message}`)
+      } else if (/INVALID_SIGNATURE/i.test(error?.message || '')) {
+        alert('Invalid signature: The provided private key does not match the on-file key for account ' + (import.meta.env.VITE_MY_ACCOUNT_ID || '') + '. Use the correct key for this account, or switch to the account that corresponds to this private key (ECDSA vs Ed25519 mismatch).')
       } else {
         alert('Failed to place bet: ' + error.message)
       }

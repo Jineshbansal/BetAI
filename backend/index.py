@@ -1,6 +1,8 @@
 import os
 import json
 import time
+import requests
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
@@ -12,6 +14,183 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# Envio GraphQL endpoint
+ENVIO_GRAPHQL_URL = "https://indexer.dev.hyperindex.xyz/2d0d192/v1/graphql"
+
+def fetch_historical_markets():
+    """Fetch historical market data from Envio GraphQL endpoint"""
+    query = """
+    query GetHistoricalMarkets {
+      ParimutuelPredictionMarket_QuestionAdded(
+        order_by: {endTime: desc}
+        limit: 100
+      ) {
+        id
+        questionId
+        question
+        outcomeNames
+        endTime
+      }
+      ParimutuelPredictionMarket_MarketResolved(
+        order_by: {id: desc}
+        limit: 100
+      ) {
+        id
+        questionId
+        winningOutcome
+      }
+    }
+    """
+    
+    try:
+        response = requests.post(
+            ENVIO_GRAPHQL_URL,
+            json={"query": query},
+            headers={"Content-Type": "application/json"},
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        if "errors" in data:
+            print(f"GraphQL errors: {data['errors']}")
+            return None
+            
+        return data.get("data", {})
+        
+    except Exception as e:
+        print(f"Error fetching historical markets: {e}")
+        return None
+
+def get_resolved_markets():
+    """Get markets that have been resolved with their outcomes"""
+    data = fetch_historical_markets()
+    if not data:
+        return []
+    
+    questions = {q["questionId"]: q for q in data.get("ParimutuelPredictionMarket_QuestionAdded", [])}
+    resolutions = {r["questionId"]: r for r in data.get("ParimutuelPredictionMarket_MarketResolved", [])}
+    
+    resolved_markets = []
+    for question_id, question in questions.items():
+        if question_id in resolutions:
+            resolution = resolutions[question_id]
+            winning_outcome = int(resolution["winningOutcome"])
+            
+            resolved_markets.append({
+                "questionId": question_id,
+                "question": question["question"],
+                "outcomeNames": question["outcomeNames"],
+                "winningOutcome": winning_outcome,
+                "winningOutcomeName": question["outcomeNames"][winning_outcome] if winning_outcome < len(question["outcomeNames"]) else "Unknown",
+                "endTime": int(question["endTime"]),
+                "isResolved": True
+            })
+    
+    return resolved_markets
+
+def run_backtest(markets=None, initial_capital=1000, bet_size_percent=10):
+    """Run backtesting on historical markets"""
+    if markets is None:
+        markets = get_resolved_markets()
+    
+    if not markets:
+        return {
+            "success": False,
+            "error": "No resolved markets found for backtesting"
+        }
+    
+    # Limit to recent markets for faster testing
+    markets = markets[:20]  # Test on last 20 resolved markets
+    
+    results = []
+    total_capital = initial_capital
+    total_bets = 0
+    winning_bets = 0
+    total_profit = 0
+    
+    for market in markets:
+        try:
+            # Get AI prediction for this market (blind - without knowing outcome)
+            ai_result = generate_signal(
+                question=market["question"],
+                data_sources=[],
+                risk_level="medium",
+                market_price=0.5  # Assume 50/50 for backtesting
+            )
+            
+            if not ai_result["success"]:
+                continue
+                
+            ai_confidence = ai_result["signal"]["confidence"]
+            ai_direction = ai_result["signal"]["direction"]
+            
+            # Determine bet based on AI prediction
+            bet_amount = total_capital * (bet_size_percent / 100)
+            if bet_amount < 1:  # Minimum bet
+                bet_amount = 1
+                
+            # Simulate betting on "Yes" outcome (index 0)
+            # In real markets, you'd bet on the outcome you think will win
+            bet_on_yes = ai_confidence > 0.5
+            
+            # Check if AI was correct
+            actual_winner = market["winningOutcome"]
+            ai_correct = (bet_on_yes and actual_winner == 0) or (not bet_on_yes and actual_winner != 0)
+            
+            # Calculate profit/loss
+            if ai_correct:
+                # Assume 2x return for correct prediction (simplified)
+                profit = bet_amount * 1.0  # 100% profit
+                total_capital += profit
+                winning_bets += 1
+            else:
+                # Lose the bet
+                total_capital -= bet_amount
+                profit = -bet_amount
+            
+            total_profit += profit
+            total_bets += 1
+            
+            results.append({
+                "questionId": market["questionId"],
+                "question": market["question"],
+                "aiConfidence": ai_confidence,
+                "aiDirection": ai_direction,
+                "betOnYes": bet_on_yes,
+                "actualWinner": actual_winner,
+                "actualWinnerName": market["winningOutcomeName"],
+                "aiCorrect": ai_correct,
+                "betAmount": bet_amount,
+                "profit": profit,
+                "capitalAfter": total_capital,
+                "timestamp": market["endTime"]
+            })
+            
+        except Exception as e:
+            print(f"Error processing market {market['questionId']}: {e}")
+            continue
+    
+    # Calculate performance metrics
+    accuracy = (winning_bets / total_bets * 100) if total_bets > 0 else 0
+    roi = ((total_capital - initial_capital) / initial_capital * 100) if initial_capital > 0 else 0
+    
+    return {
+        "success": True,
+        "summary": {
+            "totalMarkets": len(markets),
+            "totalBets": total_bets,
+            "winningBets": winning_bets,
+            "accuracy": round(accuracy, 2),
+            "initialCapital": initial_capital,
+            "finalCapital": round(total_capital, 2),
+            "totalProfit": round(total_profit, 2),
+            "roi": round(roi, 2),
+            "betSizePercent": bet_size_percent
+        },
+        "results": results
+    }
 
 def generate_signal(question, data_sources, risk_level, market_price=0.65):
     """Generate trading signal based on question and data sources"""
@@ -194,6 +373,46 @@ def api_generate_signal():
         else:
             return jsonify(result), 500
             
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/backtest/run', methods=['POST'])
+def api_run_backtest():
+    """API endpoint to run backtesting"""
+    try:
+        data = request.get_json() or {}
+        
+        initial_capital = data.get('initialCapital', 1000)
+        bet_size_percent = data.get('betSizePercent', 10)
+        
+        # Validate inputs
+        if initial_capital <= 0:
+            return jsonify({"success": False, "error": "Initial capital must be positive"}), 400
+        
+        if bet_size_percent <= 0 or bet_size_percent > 100:
+            return jsonify({"success": False, "error": "Bet size must be between 1-100%"}), 400
+        
+        result = run_backtest(
+            initial_capital=initial_capital,
+            bet_size_percent=bet_size_percent
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/backtest/markets', methods=['GET'])
+def api_get_resolved_markets():
+    """API endpoint to get resolved markets for backtesting"""
+    try:
+        markets = get_resolved_markets()
+        return jsonify({
+            "success": True,
+            "markets": markets,
+            "count": len(markets)
+        })
+        
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

@@ -2,14 +2,6 @@ import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useWallet } from '../contexts/WalletContext'
 import { ethers } from 'ethers'
-import {
-  Client,
-  ContractExecuteTransaction,
-  Hbar,
-  ContractFunctionParameters,
-  PrivateKey,
-  AccountId
-} from "@hashgraph/sdk";
 
 export default function PredictOutput() {
   const { signer, account } = useWallet()
@@ -24,10 +16,12 @@ export default function PredictOutput() {
   // Signal and autonomous execution state
   const [currentSignal, setCurrentSignal] = useState(null)
   const [isAutonomousActive, setIsAutonomousActive] = useState(false)
-  const [autonomousStatus, setAutonomousStatus] = useState('idle') // idle, running, stopped
+  const [autonomousStatus, setAutonomousStatus] = useState('idle') // idle, running, stopped, fetching, error
   const [nextSignalTime, setNextSignalTime] = useState(null)
   const [betAmount, setBetAmount] = useState('10') // Default bet amount in HBAR
   const [questionId, setQuestionId] = useState(1) // Default question ID for betting
+  const [statusMessage, setStatusMessage] = useState('') // Real-time status updates
+  const [signalHistory, setSignalHistory] = useState([]) // Track signal history
   
   const intervalRef = useRef(null)
   const BACKEND_URL = 'http://localhost:5000'
@@ -73,6 +67,9 @@ export default function PredictOutput() {
 
   // Function to fetch signal from backend
   const fetchSignal = async () => {
+    setStatusMessage('🔄 Connecting to AI backend...')
+    setAutonomousStatus('fetching')
+    
     try {
       const response = await fetch(`${BACKEND_URL}/api/generate-signal`, {
         method: 'POST',
@@ -82,22 +79,37 @@ export default function PredictOutput() {
         body: JSON.stringify({
           question: selectedQuestion || customQuestion,
           dataSources,
-      riskLevel,
+          riskLevel,
           marketPrice: 0.65 // Default market price, can be made dynamic
         })
       })
+
+      if (!response.ok) {
+        throw new Error(`Backend returned ${response.status}: ${response.statusText}`)
+      }
 
       const data = await response.json()
       
       if (data.success) {
         setCurrentSignal(data.signal)
+        setStatusMessage(`✅ Signal received: ${data.signal.direction} (${(data.signal.confidence * 100).toFixed(1)}% confidence)`)
+        
+        // Add to history
+        setSignalHistory(prev => [...prev, {
+          timestamp: new Date().toLocaleTimeString(),
+          signal: data.signal
+        }].slice(-5)) // Keep last 5 signals
+        
         return data.signal
       } else {
+        setStatusMessage('❌ Backend error: ' + (data.error || 'Unknown error'))
         console.error('Failed to generate signal:', data.error)
         return null
       }
     } catch (error) {
       console.error('Error fetching signal:', error)
+      setStatusMessage(`❌ Cannot connect to backend: ${error.message}. Make sure Flask server is running on port 5000.`)
+      setAutonomousStatus('error')
       return null
     }
   }
@@ -135,15 +147,16 @@ export default function PredictOutput() {
     }
   }
 
-  // Function to place bet on contract
+  // Function to place bet on contract (using ethers.js approach from PredictionMarket.jsx)
   const placeBet = async (outcomeIndex) => {
     if (!signer) {
-      alert('Please connect your wallet first')
+      setStatusMessage('❌ Please connect your wallet first')
       return false
     }
 
     // Validate spending limit
     if (!validateSpendingLimit(betAmount)) {
+      setStatusMessage('❌ Bet amount exceeds spending limit')
       return false
     }
 
@@ -151,7 +164,7 @@ export default function PredictOutput() {
     const balance = await checkBalance()
     if (balance !== null) {
       const betAmountNum = parseFloat(betAmount)
-      const estimatedGasCost = 0.1 // Rough estimate for gas in HBAR
+      const estimatedGasCost = 0.05 // Rough estimate for gas in HBAR
       const totalNeeded = betAmountNum + estimatedGasCost
       
       console.log(`Wallet balance: ${balance.toFixed(2)} HBAR`)
@@ -160,87 +173,54 @@ export default function PredictOutput() {
       console.log(`Total needed: ${totalNeeded} HBAR`)
       
       if (balance < totalNeeded) {
-        alert(`Insufficient balance!\n\nYour balance: ${balance.toFixed(2)} HBAR\nBet amount: ${betAmountNum} HBAR\nEstimated gas: ${estimatedGasCost} HBAR\nTotal needed: ${totalNeeded} HBAR\n\nPlease reduce bet amount or add more HBAR to your wallet.`)
+        setStatusMessage(`❌ Insufficient balance! Need ${totalNeeded.toFixed(2)} HBAR, have ${balance.toFixed(2)} HBAR`)
         return false
       }
     }
 
+    setStatusMessage(`💰 Placing bet: ${betAmount} HBAR on outcome ${outcomeIndex === 0 ? 'YES' : 'NO'}...`)
 
     try {
-      // ✅ Connect to Hedera testnet (use Vite env vars in frontend)
-      const client = Client.forTestnet();
-      const ACC = String(import.meta.env.VITE_MY_ACCOUNT_ID || '').trim()
-      const KEY = String(import.meta.env.VITE_MY_PRIVATE_KEY || '').trim()
-      if (!ACC || !KEY) {
-        alert('Missing Hedera operator keys. Create frontend/.env.local with VITE_MY_ACCOUNT_ID and VITE_MY_PRIVATE_KEY, then restart the dev server.')
-        return false
+      // Import contract config
+      const { CONTRACT_ADDRESS, contractABI } = await import('../contracts/config.js')
+      
+      const amountWei = ethers.parseUnits(String(betAmount).trim(), 18)
+      const qId = BigInt(questionId)
+      const oIdx = BigInt(outcomeIndex)
+      
+      const iface = new ethers.Interface(contractABI)
+      const dataHex = iface.encodeFunctionData('placeBet', [qId, oIdx, amountWei])
+      
+      setStatusMessage('⏳ Waiting for wallet confirmation...')
+      
+      const txRequest = { 
+        to: CONTRACT_ADDRESS, 
+        data: dataHex, 
+        value: ethers.toBeHex(amountWei), 
+        gasLimit: 300000n 
       }
-      let priv
-      try {
-        const keyNo0x = KEY.startsWith('0x') ? KEY.slice(2) : KEY
-        if (/^0x[0-9a-fA-F]{64}$/.test(KEY)) {
-          // ECDSA secp256k1 raw hex
-          priv = PrivateKey.fromStringECDSA(KEY)
-        } else if (/^(302e|302d|302c)/i.test(keyNo0x)) {
-          // DER-encoded Ed25519 private key (hex)
-          priv = PrivateKey.fromStringDer(keyNo0x)
-        } else if (/^[0-9a-fA-F]{64}$/.test(KEY)) {
-          // Raw 32-byte Ed25519 hex
-          priv = PrivateKey.fromStringED25519(KEY)
-        } else {
-          // Fallback to generic
-          priv = PrivateKey.fromString(KEY)
-        }
-      } catch (e) {
-        alert('Private key format not recognized. Use 0x<64-hex> for ECDSA or 302e.. DER hex for Ed25519.')
-        return false
-      }
-      client.setOperator(AccountId.fromString(ACC), priv);
-  
-      // Convert HBAR to tinybars (1 HBAR = 100,000,000 tinybars)
-      const amountTinybars = Hbar.from(betAmount).toTinybars();
-  
-      console.log(`Placing bet of ${betAmount} HBAR (${amountTinybars} tinybars)`);
-  
-      // ✅ Build the transaction to call the contract function
-      const tx = new ContractExecuteTransaction()
-        .setContractId('0.0.7100616') // NOT address — use Hedera Contract ID (e.g., "0.0.123456")
-        .setGas(200000) // adjust based on function complexity
-        .setPayableAmount(Hbar.fromTinybars(amountTinybars))
-        .setFunction(
-          "placeBet",
-          new ContractFunctionParameters()
-            .addUint256(questionId)
-            .addUint256(outcomeIndex)
-            .addUint256(amountTinybars)
-        );
-  
-      // Submit the transaction
-      const submitTx = await tx.execute(client);
-  
-      // Get the receipt to confirm success
-      const receipt = await submitTx.getReceipt(client);
-      console.log("✅ Transaction status:", receipt.status.toString());
-  
-      if (receipt.status.toString() === "SUCCESS") {
-        alert("Bet placed successfully!");
-        return true;
-      } else {
-        alert(`Transaction failed: ${receipt.status.toString()}`);
-        return false;
-      }
+      
+      const sent = await signer.sendTransaction(txRequest)
+      setStatusMessage('⏳ Transaction submitted, waiting for confirmation...')
+      
+      const receipt = await sent.wait()
+      console.log("✅ Transaction confirmed:", receipt)
+      
+      setStatusMessage(`✅ Bet placed successfully! Tx: ${receipt.hash.slice(0, 10)}...`)
+      return true
+      
     } catch (error) {
       console.error('Error placing bet:', error)
       
       // Provide more helpful error messages
-      if (error.code === 'INSUFFICIENT_FUNDS') {
-        alert(`Insufficient funds for transaction.\n\nYou need:\n- ${betAmount} HBAR for the bet\n- Additional HBAR for gas fees\n\nTry reducing the bet amount or ensure you have enough HBAR for both the bet and gas fees.`)
-      } else if (error.message.includes('gas')) {
-        alert(`Gas estimation failed. This might be due to:\n- Insufficient funds for gas\n- Contract not deployed\n- Invalid question ID\n\nError: ${error.message}`)
-      } else if (/INVALID_SIGNATURE/i.test(error?.message || '')) {
-        alert('Invalid signature: The provided private key does not match the on-file key for account ' + (import.meta.env.VITE_MY_ACCOUNT_ID || '') + '. Use the correct key for this account, or switch to the account that corresponds to this private key (ECDSA vs Ed25519 mismatch).')
+      if (error.code === 'ACTION_REJECTED') {
+        setStatusMessage('❌ Transaction rejected by user')
+      } else if (error.code === 'INSUFFICIENT_FUNDS') {
+        setStatusMessage(`❌ Insufficient funds for gas fees`)
+      } else if (error.message?.includes('gas')) {
+        setStatusMessage(`❌ Gas estimation failed. Check contract address and question ID.`)
       } else {
-        alert('Failed to place bet: ' + error.message)
+        setStatusMessage(`❌ Failed to place bet: ${error.message}`)
       }
       return false
     }
@@ -258,38 +238,79 @@ export default function PredictOutput() {
       return
     }
 
+    if (!signer || !account) {
+      alert('Please connect your wallet first')
+      return
+    }
+
     setIsAutonomousActive(true)
     setAutonomousStatus('running')
+    setStatusMessage('🚀 Starting autonomous trading agent...')
+    
+    // Add a small delay to show the status update
+    await new Promise(resolve => setTimeout(resolve, 1000))
     
     // Fetch initial signal
     const signal = await fetchSignal()
     
-    if (signal && signal.direction === 'BUY') {
+    if (!signal) {
+      setStatusMessage('❌ Failed to fetch signal. Check if backend is running.')
+      setAutonomousStatus('error')
+      setIsAutonomousActive(false)
+      return
+    }
+    
+    if (signal.direction === 'BUY') {
+      setStatusMessage(`📊 BUY signal detected! Placing bet on YES...`)
       // Place bet for YES outcome (index 0) and stop
       const betPlaced = await placeBet(0)
       if (betPlaced) {
         setAutonomousStatus('completed')
         setIsAutonomousActive(false)
-        alert('Bet placed successfully! Autonomous trading completed for this question.')
+        alert('✅ Bet placed successfully! Autonomous trading completed for this question.')
+        return
+      } else {
+        setAutonomousStatus('error')
+        setIsAutonomousActive(false)
         return
       }
-    } else if (signal && signal.direction === 'SELL') {
+    } else if (signal.direction === 'SELL') {
+      setStatusMessage(`📊 SELL signal detected! Placing bet on NO...`)
       // Place bet for NO outcome (index 1) and stop
       const betPlaced = await placeBet(1)
       if (betPlaced) {
         setAutonomousStatus('completed')
         setIsAutonomousActive(false)
-        alert('Bet placed successfully! Autonomous trading completed for this question.')
+        alert('✅ Bet placed successfully! Autonomous trading completed for this question.')
+        return
+      } else {
+        setAutonomousStatus('error')
+        setIsAutonomousActive(false)
         return
       }
+    } else {
+      // HOLD signal - continue monitoring
+      setStatusMessage(`⏸️ HOLD signal received. Monitoring market... Next check in 1 hour.`)
+      setAutonomousStatus('running')
     }
 
     // If we get HOLD, continue monitoring until we get BUY/SELL
     // Set up interval for continuous signal fetching (1 hour = 3600000 ms)
+    // For testing, use 30 seconds: 30000 ms
+    const checkInterval = 30000 // 30 seconds for testing, change to 3600000 for 1 hour
+    
     intervalRef.current = setInterval(async () => {
+      setStatusMessage('🔄 Checking for new signal...')
       const newSignal = await fetchSignal()
       
-      if (newSignal && newSignal.direction === 'BUY') {
+      if (!newSignal) {
+        setStatusMessage('❌ Failed to fetch signal. Retrying next cycle...')
+        setNextSignalTime(Date.now() + checkInterval)
+        return
+      }
+      
+      if (newSignal.direction === 'BUY') {
+        setStatusMessage(`📊 BUY signal detected! Placing bet on YES...`)
         const betPlaced = await placeBet(0)
         if (betPlaced) {
           // Stop monitoring after successful bet placement
@@ -298,9 +319,17 @@ export default function PredictOutput() {
           setAutonomousStatus('completed')
           setIsAutonomousActive(false)
           setNextSignalTime(null)
-          alert('Bet placed successfully! Autonomous trading completed for this question.')
+          alert('✅ Bet placed successfully! Autonomous trading completed for this question.')
+        } else {
+          setStatusMessage('❌ Bet placement failed. Stopping autonomous trading.')
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+          setAutonomousStatus('error')
+          setIsAutonomousActive(false)
+          setNextSignalTime(null)
         }
-      } else if (newSignal && newSignal.direction === 'SELL') {
+      } else if (newSignal.direction === 'SELL') {
+        setStatusMessage(`📊 SELL signal detected! Placing bet on NO...`)
         const betPlaced = await placeBet(1)
         if (betPlaced) {
           // Stop monitoring after successful bet placement
@@ -309,17 +338,26 @@ export default function PredictOutput() {
           setAutonomousStatus('completed')
           setIsAutonomousActive(false)
           setNextSignalTime(null)
-          alert('Bet placed successfully! Autonomous trading completed for this question.')
+          alert('✅ Bet placed successfully! Autonomous trading completed for this question.')
+        } else {
+          setStatusMessage('❌ Bet placement failed. Stopping autonomous trading.')
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+          setAutonomousStatus('error')
+          setIsAutonomousActive(false)
+          setNextSignalTime(null)
         }
+      } else {
+        // Still HOLD, continue monitoring
+        setStatusMessage(`⏸️ HOLD signal. Continuing to monitor... Next check in ${checkInterval / 1000}s`)
       }
-      // If HOLD, continue monitoring (don't place bet, don't stop)
       
       // Update next signal time
-      setNextSignalTime(Date.now() + 3600000)
-    }, 3600000) // 1 hour interval
+      setNextSignalTime(Date.now() + checkInterval)
+    }, checkInterval)
 
     // Set initial next signal time
-    setNextSignalTime(Date.now() + 3600000)
+    setNextSignalTime(Date.now() + checkInterval)
   }
 
   // Function to stop autonomous execution
@@ -331,6 +369,7 @@ export default function PredictOutput() {
     setIsAutonomousActive(false)
     setAutonomousStatus('stopped')
     setNextSignalTime(null)
+    setStatusMessage('⏹️ Autonomous trading stopped by user')
   }
 
   // Cleanup on component unmount
@@ -617,23 +656,58 @@ export default function PredictOutput() {
 
             {/* Autonomous Status Display */}
             <div className="mt-4 p-4 rounded-lg bg-white/5 border border-white/10">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-white/60">Autonomous Status:</span>
                 <span className={`px-2 py-1 rounded text-xs font-medium ${
                   autonomousStatus === 'running' ? 'bg-green-500/20 text-green-300' :
+                  autonomousStatus === 'fetching' ? 'bg-yellow-500/20 text-yellow-300' :
                   autonomousStatus === 'completed' ? 'bg-blue-500/20 text-blue-300' :
                   autonomousStatus === 'stopped' ? 'bg-red-500/20 text-red-300' :
+                  autonomousStatus === 'error' ? 'bg-red-500/20 text-red-300' :
                   'bg-gray-500/20 text-gray-300'
                 }`}>
                   {autonomousStatus.toUpperCase()}
                 </span>
               </div>
               
+              {/* Real-time Status Message */}
+              {statusMessage && (
+                <div className="mb-3 p-2 rounded bg-blue-500/10 border border-blue-500/20">
+                  <div className="text-sm text-blue-200">{statusMessage}</div>
+                </div>
+              )}
+              
               {currentSignal && (
-                <div className="text-sm text-white/80 mb-2">
-                  <div>Last Signal: <span className="font-medium">{currentSignal.direction}</span></div>
+                <div className="text-sm text-white/80 mb-2 p-2 bg-white/5 rounded">
+                  <div className="font-medium text-white mb-1">Latest Signal:</div>
+                  <div>Direction: <span className={`font-medium ${
+                    currentSignal.direction === 'BUY' ? 'text-green-400' :
+                    currentSignal.direction === 'SELL' ? 'text-red-400' :
+                    'text-yellow-400'
+                  }`}>{currentSignal.direction}</span></div>
                   <div>Confidence: <span className="font-medium">{(currentSignal.confidence * 100).toFixed(1)}%</span></div>
                   <div>Reason: <span className="text-white/60">{currentSignal.reason}</span></div>
+                </div>
+              )}
+              
+              {/* Signal History */}
+              {signalHistory.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-xs text-white/40 mb-2">Signal History:</div>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {signalHistory.map((entry, idx) => (
+                      <div key={idx} className="text-xs text-white/60 flex justify-between">
+                        <span>{entry.timestamp}</span>
+                        <span className={
+                          entry.signal.direction === 'BUY' ? 'text-green-400' :
+                          entry.signal.direction === 'SELL' ? 'text-red-400' :
+                          'text-yellow-400'
+                        }>
+                          {entry.signal.direction} ({(entry.signal.confidence * 100).toFixed(0)}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               

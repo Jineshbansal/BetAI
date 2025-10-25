@@ -2,9 +2,7 @@
 name: envio-indexer
 networks:
 - id: 296
-  rpc_config:
-      url: https://testnet.hashio.io/api
-      initial_block_interval: 1000
+  rpc: https://testnet.hashio.io/api
   start_block: 0
   contracts:
   - name: ParimutuelPredictionMarket

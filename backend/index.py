@@ -4,7 +4,9 @@ import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
+from new import get_news_lines
 from dotenv import load_dotenv
+
 
 load_dotenv()
 app = Flask(__name__)
@@ -14,8 +16,8 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 def generate_signal(question, data_sources, risk_level, market_price=0.65):
     """Generate trading signal based on question and data sources"""
     
-    # Simulate context from data sources (in real implementation, fetch actual data)
-    texts = [
+    # Pull live context from NewsAPI via new.py using the incoming question
+    texts = get_news_lines(question, max_items=6) or [
         "Bitcoin hits $69,200 amid ETF optimism.",
         "Some traders expect pullback after short-term rally.",
         "Whales are accumulating Bitcoin heavily again",
@@ -192,6 +194,36 @@ def api_generate_signal():
         else:
             return jsonify(result), 500
             
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/news-context', methods=['GET', 'POST'])
+def api_news_context():
+    try:
+        question = ''
+        limit = 6
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            question = (data.get('question') or '').strip()
+            try:
+                limit = int(data.get('limit', limit))
+            except Exception:
+                pass
+        else:
+            question = (request.args.get('q') or '').strip()
+            l = request.args.get('limit')
+            if l:
+                try:
+                    limit = int(l)
+                except Exception:
+                    pass
+        lines = get_news_lines(question, max_items=limit)
+        return jsonify({
+            "success": True,
+            "query": question,
+            "count": len(lines),
+            "lines": lines
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

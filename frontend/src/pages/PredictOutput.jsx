@@ -28,6 +28,9 @@ export default function PredictOutput() {
   const [nextSignalTime, setNextSignalTime] = useState(null)
   const [betAmount, setBetAmount] = useState('10') // Default bet amount in HBAR
   const [questionId, setQuestionId] = useState(1) // Default question ID for betting
+  const [newsQuery, setNewsQuery] = useState('')
+  const [newsLines, setNewsLines] = useState([])
+  const [isFetchingContext, setIsFetchingContext] = useState(false)
   
   const intervalRef = useRef(null)
   const BACKEND_URL = 'http://localhost:5000'
@@ -69,6 +72,7 @@ export default function PredictOutput() {
   const handleCustomQuestionChange = (e) => {
     setCustomQuestion(e.target.value)
     setSelectedQuestion('')
+    setNewsLines([])
   }
 
   // Function to fetch signal from backend
@@ -82,8 +86,8 @@ export default function PredictOutput() {
         body: JSON.stringify({
           question: selectedQuestion || customQuestion,
           dataSources,
-      riskLevel,
-          marketPrice: 0.65 // Default market price, can be made dynamic
+          riskLevel,
+          marketPrice: 0.65
         })
       })
 
@@ -99,6 +103,34 @@ export default function PredictOutput() {
     } catch (error) {
       console.error('Error fetching signal:', error)
       return null
+    }
+  }
+
+  const fetchNewsContext = async () => {
+    const q = selectedQuestion || customQuestion
+    if (!q) {
+      alert('Please select or enter a question first')
+      return
+    }
+    setIsFetchingContext(true)
+    setNewsLines([])
+    setNewsQuery(q)
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/news-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, limit: 6 })
+      })
+      const data = await res.json()
+      if (data?.success) {
+        setNewsLines(Array.isArray(data.lines) ? data.lines : [])
+      } else {
+        console.error('Failed to fetch news context:', data)
+      }
+    } catch (err) {
+      console.error('Error fetching news context:', err)
+    } finally {
+      setIsFetchingContext(false)
     }
   }
   // Function to validate spending limit
@@ -501,6 +533,45 @@ export default function PredictOutput() {
         </div>
       </motion.div>
 
+      {/* News Context Preview */}
+      <motion.div
+        initial={{opacity:0,y:8}}
+        animate={{opacity:1,y:0}}
+        transition={{delay:0.45}}
+        className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold">4. Fetch News Context</h3>
+          <button
+            onClick={fetchNewsContext}
+            disabled={!(selectedQuestion || customQuestion) || isFetchingContext}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              !(selectedQuestion || customQuestion) || isFetchingContext
+                ? 'bg-gray-600 cursor-not-allowed text-white/50'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+            }`}
+          >
+            {isFetchingContext ? 'Fetching…' : 'Fetch Context'}
+          </button>
+        </div>
+        <div className="text-sm text-white/60 mb-2">Query:</div>
+        <div className="text-white/80 text-sm font-mono break-words mb-4">
+          {(selectedQuestion || customQuestion) || '—'}
+        </div>
+        {newsLines.length > 0 ? (
+          <div>
+            <div className="text-sm text-white/60 mb-2">Context Lines:</div>
+            <ul className="space-y-2 text-sm text-white/80 list-disc pl-5">
+              {newsLines.map((l, i) => (
+                <li key={i}>{l}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="text-white/50 text-sm">No context fetched yet.</div>
+        )}
+      </motion.div>
+
       {/* Execution Mode */}
       <motion.div 
         initial={{opacity:0,y:8}} 
@@ -508,7 +579,7 @@ export default function PredictOutput() {
         transition={{delay:0.5}}
         className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
       >
-        <h3 className="text-lg font-semibold mb-4">4. Execution Mode</h3>
+  <h3 className="text-lg font-semibold mb-4">5. Execution Mode</h3>
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row gap-4">
             <button
@@ -579,7 +650,7 @@ export default function PredictOutput() {
           transition={{delay:0.55}}
           className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
         >
-          <h3 className="text-lg font-semibold mb-4">5. Autonomous Execution Settings</h3>
+          <h3 className="text-lg font-semibold mb-4">6. Autonomous Execution Settings</h3>
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -730,7 +801,7 @@ export default function PredictOutput() {
         transition={{delay:0.7}}
         className="mt-8 p-4 rounded-lg bg-blue-500/10 border border-blue-500/20"
       >
-        <h4 className="font-semibold text-blue-300 mb-2">How it works:</h4>
+  <h4 className="font-semibold text-blue-300 mb-2">How it works:</h4>
         <ul className="text-sm text-white/70 space-y-1">
           <li>• AI analyzes selected data sources in real-time</li>
           <li>• Generates predictions based on your risk tolerance</li>

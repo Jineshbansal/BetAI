@@ -1,0 +1,29 @@
+type ParimutuelPredictionMarket_BetPlaced {
+  id: ID!
+  questionId: BigInt!
+  user: String!
+  outcomeIndex: BigInt!
+  amount: BigInt!
+}
+
+type ParimutuelPredictionMarket_MarketResolved {
+  id: ID!
+  questionId: BigInt!
+  winningOutcome: BigInt!
+}
+
+type ParimutuelPredictionMarket_QuestionAdded {
+  id: ID!
+  questionId: BigInt!
+  question: String!
+  outcomeNames: [String!]!
+  endTime: BigInt!
+}
+
+type ParimutuelPredictionMarket_WinningsClaimed {
+  id: ID!
+  questionId: BigInt!
+  user: String!
+  amount: BigInt!
+}
+

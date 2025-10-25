@@ -33,6 +33,8 @@ export default function PredictOutput() {
   const [isFetchingContext, setIsFetchingContext] = useState(false)
   const [lastContextFetchedAt, setLastContextFetchedAt] = useState(null)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [includeBacktest, setIncludeBacktest] = useState(false)
+  const [backtestSummary, setBacktestSummary] = useState(null)
   
   const intervalRef = useRef(null)
   const BACKEND_URL = 'http://localhost:5000'
@@ -80,6 +82,7 @@ export default function PredictOutput() {
   // Function to fetch signal from backend
   const fetchSignal = async () => {
     try {
+      setIsGenerating(true)
       const response = await fetch(`${BACKEND_URL}/api/generate-signal`, {
         method: 'POST',
         headers: {
@@ -89,7 +92,8 @@ export default function PredictOutput() {
           question: selectedQuestion || customQuestion,
           dataSources,
           riskLevel,
-          marketPrice: 0.65
+          marketPrice: 0.65,
+          includeBacktest: includeBacktest
         })
       })
 
@@ -97,6 +101,12 @@ export default function PredictOutput() {
       
       if (data.success) {
         setCurrentSignal(data.signal)
+        
+        // Store backtest summary if available
+        if (data.backtest_summary) {
+          setBacktestSummary(data.backtest_summary)
+        }
+        
         return data.signal
       } else {
         console.error('Failed to generate signal:', data.error)
@@ -105,6 +115,8 @@ export default function PredictOutput() {
     } catch (error) {
       console.error('Error fetching signal:', error)
       return null
+    } finally {
+      setIsGenerating(false)
     }
   }
 
@@ -118,20 +130,28 @@ export default function PredictOutput() {
     setNewsLines([])
     setNewsQuery(q)
     try {
+      console.log('Fetching news context for:', q)
       const res = await fetch(`${BACKEND_URL}/api/news-context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: q, limit: 6 })
       })
+      
+      console.log('Response status:', res.status)
       const data = await res.json()
+      console.log('Response data:', data)
+      
       if (data?.success) {
         setNewsLines(Array.isArray(data.lines) ? data.lines : [])
         setLastContextFetchedAt(new Date())
+        console.log('News lines set:', data.lines?.length || 0)
       } else {
         console.error('Failed to fetch news context:', data)
+        alert(`Failed to fetch news: ${data?.error || 'Unknown error'}`)
       }
     } catch (err) {
       console.error('Error fetching news context:', err)
+      alert(`Error fetching news: ${err.message}`)
     } finally {
       setIsFetchingContext(false)
     }
@@ -554,6 +574,38 @@ export default function PredictOutput() {
             className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-accent focus:outline-none"
             rows="3"
           />
+        </div>
+        
+        {/* Backtest Toggle */}
+        <div className="mt-6 p-4 rounded-lg bg-white/5 border border-white/10">
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="includeBacktest"
+              checked={includeBacktest}
+              onChange={(e) => setIncludeBacktest(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border-white/10 bg-white/5 text-accent focus:ring-accent focus:ring-offset-0"
+            />
+            <div className="flex-1">
+              <label htmlFor="includeBacktest" className="text-white font-medium cursor-pointer">
+                📊 Use Backtesting Context (Recommended)
+              </label>
+              <p className="text-sm text-white/60 mt-1">
+                Include historical performance data to improve prediction accuracy. The AI will consider how it performed on similar questions in the past.
+                {includeBacktest && <span className="text-amber-400"> ⚠️ This will take 30-60 seconds longer.</span>}
+              </p>
+              {backtestSummary && (
+                <div className="mt-3 p-3 rounded-lg bg-accent/10 border border-accent/20">
+                  <div className="text-sm text-white/80">
+                    <div className="font-semibold text-accent mb-1">Last Backtest Performance:</div>
+                    <div>• Accuracy: <span className="font-medium">{backtestSummary.accuracy}%</span></div>
+                    <div>• ROI: <span className="font-medium">{backtestSummary.roi}%</span></div>
+                    <div>• Total Bets: <span className="font-medium">{backtestSummary.total_bets}</span></div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </motion.div>
 

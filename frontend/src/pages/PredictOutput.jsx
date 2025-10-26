@@ -84,26 +84,36 @@ export default function PredictOutput() {
     const newMsgs = [...chatMessages, { role: 'user', text }]
     setChatMessages(newMsgs)
     setChatInput('')
+    
     try {
-      const res = await fetch(`${BACKEND_URL}/api/agent-chat`, {
+      // Call the Hedera server API
+      const res = await fetch('http://localhost:3001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: text })
       })
+      
       const data = await res.json()
+      
       if (!data?.success) {
         throw new Error(data?.error || 'Agent error')
       }
-      // Extract a readable answer
-      let reply = ''
-      const agent = data.agent || {}
-      // Langchain executor typically returns an object with output field
-      if (typeof agent.result === 'string') reply = agent.result
-      else if (agent?.result?.output) reply = agent.result.output
-      else if (agent?.result?.output_text) reply = agent.result.output_text
-      else reply = JSON.stringify(agent, null, 2)
+      
+      // Extract the message from the response
+      let reply = data.message || 'No response received'
+      
+      // Add the assistant's response to chat
       setChatMessages(prev => [...prev, { role: 'assistant', text: reply }])
+      
+      // Check if this was a transaction and show success message
+      if (reply.toLowerCase().includes('transaction completed') || 
+          reply.toLowerCase().includes('success')) {
+        // You can add additional success handling here if needed
+        console.log('✅ Transaction completed successfully')
+      }
+      
     } catch (e) {
+      console.error('Chat error:', e)
       setChatError(String(e.message || e))
     } finally {
       setChatLoading(false)

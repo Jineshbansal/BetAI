@@ -9,11 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@hashgraph/sdk": "^2.75.0",
     "@hashgraph/hashconnect": "^1.10.3",
+    "@hashgraph/sdk": "^2.75.0",
+    "@langchain/core": "^0.3.78",
+    "@langchain/groq": "^0.2.4",
     "dotenv": "^17.2.3",
     "ethers": "^6.13.4",
     "framer-motion": "^11.5.5",
+    "hedera-agent-kit": "^3.4.0",
+    "langchain": "^0.3.36",
     "lucide-react": "^0.546.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

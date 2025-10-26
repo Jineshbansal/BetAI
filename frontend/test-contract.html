@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Contract Test</title>
+  <script type="module">
+    import { ethers } from 'https://cdn.jsdelivr.net/npm/ethers@6.9.0/+esm'
+    
+    const CONTRACT_ADDRESS = '0x53f25235e70380605ea794da768d9662ab72ad52'
+    const ABI = [
+      { "type": "function", "stateMutability": "view", "name": "questionCounter", "inputs": [], "outputs": [ {"type":"uint256"} ] },
+      { "type": "function", "stateMutability": "view", "name": "userBets", "inputs": [ {"name":"","type":"address"}, {"name":"","type":"uint256"}, {"name":"","type":"uint256"} ], "outputs": [ {"type":"uint256"} ] },
+      { "type": "function", "stateMutability": "view", "name": "getMarket", "inputs": [ { "name": "_questionId", "type": "uint256" } ], "outputs": [
+        { "name": "question", "type": "string" },
+        { "name": "outcomes", "type": "tuple[]", "components": [ {"name":"name","type":"string"}, {"name":"totalBetAmount","type":"uint256"} ] },
+        { "name": "endTime", "type": "uint256" },
+        { "name": "marketResolved", "type": "bool" },
+        { "name": "winningOutcome", "type": "uint256" },
+        { "name": "totalMarketPool", "type": "uint256" }
+      ] }
+    ]
+    
+    window.testContract = async function() {
+      const log = document.getElementById('log')
+      log.innerHTML = '<div>🔍 Testing contract...</div>'
+      
+      try {
+        // Connect to MetaMask
+        if (!window.ethereum) {
+          log.innerHTML += '<div style="color: red;">❌ MetaMask not found!</div>'
+          return
+        }
+        
+        const provider = new ethers.BrowserProvider(window.ethereum)
+        const accounts = await provider.send('eth_requestAccounts', [])
+        const account = accounts[0]
+        
+        log.innerHTML += `<div>✅ Connected: ${account}</div>`
+        
+        const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider)
+        
+        // Get question counter
+        const counter = await contract.questionCounter()
+        log.innerHTML += `<div>📊 Total Questions: ${counter.toString()}</div>`
+        
+        // Get first market if exists
+        if (counter > 0) {
+          const market = await contract.getMarket(0)
+          log.innerHTML += `<div>📝 First Market: ${market[0]}</div>`
+          log.innerHTML += `<div>🎯 Outcomes: ${market[1].length}</div>`
+          
+          // Check user bets on first market
+          for (let i = 0; i < market[1].length; i++) {
+            const bet = await contract.userBets(account, 0, i)
+            const formatted = ethers.formatEther(bet)
+            log.innerHTML += `<div>💰 Your bet on outcome ${i}: ${formatted} HBAR</div>`
+            if (parseFloat(formatted) > 0) {
+              log.innerHTML += `<div style="color: lime;">✅ FOUND YOUR BET!</div>`
+            }
+          }
+        }
+        
+        log.innerHTML += '<div style="color: lime;">✅ Test complete!</div>'
+      } catch (error) {
+        log.innerHTML += `<div style="color: red;">❌ Error: ${error.message}</div>`
+        console.error(error)
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: monospace;
+      background: #1a1a1a;
+      color: #fff;
+      padding: 20px;
+    }
+    button {
+      background: #06d6a0;
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    #log {
+      margin-top: 20px;
+      padding: 10px;
+      background: #000;
+      border: 1px solid #333;
+      border-radius: 5px;
+    }
+    #log > div {
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Contract Test Tool</h1>
+  <p>Click the button to test if your bets are being read correctly from the contract</p>
+  <button onclick="testContract()">Test Contract</button>
+  <div id="log"></div>
+</body>
+</html>

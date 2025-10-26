@@ -432,7 +432,7 @@ export default function PredictOutput() {
       if (betPlaced) {
         setAutonomousStatus('completed')
         setIsAutonomousActive(false)
-        alert('Bet placed successfully! Autonomous trading completed for this question.')
+        alert('Bet placed successfully! Autonomous Betting completed for this question.')
         return
       }
     } else if (signal && signal.direction === 'SELL') {
@@ -441,7 +441,7 @@ export default function PredictOutput() {
       if (betPlaced) {
         setAutonomousStatus('completed')
         setIsAutonomousActive(false)
-        alert('Bet placed successfully! Autonomous trading completed for this question.')
+        alert('Bet placed successfully! Autonomous Betting completed for this question.')
         return
       }
     }
@@ -460,7 +460,7 @@ export default function PredictOutput() {
           setAutonomousStatus('completed')
           setIsAutonomousActive(false)
           setNextSignalTime(null)
-          alert('Bet placed successfully! Autonomous trading completed for this question.')
+          alert('Bet placed successfully! Autonomous Betting completed for this question.')
         }
       } else if (newSignal && newSignal.direction === 'SELL') {
         const betPlaced = await placeBet(1)
@@ -471,7 +471,7 @@ export default function PredictOutput() {
           setAutonomousStatus('completed')
           setIsAutonomousActive(false)
           setNextSignalTime(null)
-          alert('Bet placed successfully! Autonomous trading completed for this question.')
+          alert('Bet placed successfully! Autonomous Betting completed for this question.')
         }
       }
       // If HOLD, continue monitoring (don't place bet, don't stop)
@@ -534,7 +534,7 @@ export default function PredictOutput() {
         transition={{delay:0.1}} 
         className="mt-3 text-white/70"
       >
-        Configure AI analysis parameters to generate profitable trading signals and predictions.
+        Configure AI analysis parameters to generate profitable betting signals and predictions.
       </motion.p>
 
       {/* Summary bar */}
@@ -638,7 +638,7 @@ export default function PredictOutput() {
         )}
       </motion.div>
 
-      {/* Trading Question */}
+      {/* betting Question */}
       <motion.div 
         initial={{opacity:0,y:8}} 
         animate={{opacity:1,y:0}} 
@@ -675,22 +675,6 @@ export default function PredictOutput() {
           ) : (
             !loadingQuestions && <div className="text-sm text-white/50">No markets found on-chain.</div>
           )}
-        </div>
-        
-        
-
-        {/* Custom Question */}
-        <div>
-          <label className="text-sm text-white/60 mb-3 block">
-            Or enter your own custom analysis question:
-          </label>
-          <textarea
-            value={customQuestion}
-            onChange={handleCustomQuestionChange}
-            placeholder="Enter your trading analysis question (e.g., 'Analyze Bitcoin price movement for next 48 hours')..."
-            className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-accent focus:outline-none"
-            rows="3"
-          />
         </div>
         
         {/* Backtest Toggle */}
@@ -1047,14 +1031,14 @@ export default function PredictOutput() {
                       : 'bg-accent text-gray-900 hover:brightness-110'
                   }`}
                 >
-                  Start Autonomous Trading
+                  Start Autonomous Betting
                 </button>
               ) : (
                 <button
                   onClick={stopAutonomousExecution}
                   className="px-4 py-2 rounded-lg font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
                 >
-                  Stop Autonomous Trading
+                  Stop Autonomous Betting
                 </button>
               )}
             </div>
@@ -1087,14 +1071,14 @@ export default function PredictOutput() {
         >
           {isGenerating
             ? 'Generating…'
-            : (spendingMode === 'auto' ? 'Start Autonomous Trading' : 'Generate Trading Signal')}
+            : (spendingMode === 'auto' ? 'Start Autonomous Betting' : 'Generate Betting Signal')}
         </button>
         <div className="text-center text-white/50 text-sm mt-3">
           {!selectedQuestion && !customQuestion 
             ? 'Please select or enter an analysis question to generate signals'
             : spendingMode === 'auto'
               ? 'AI will monitor signals and place ONE bet when BUY/SELL signal is detected'
-            : 'AI will analyze selected data sources and generate profitable trading signals'
+            : 'AI will analyze selected data sources and generate profitable betting signals'
           }
         </div>
       </motion.div>

@@ -28,7 +28,7 @@ export default function FeatureGrid() {
 
       <div className="mb-8 text-center">
         <h2 className="text-3xl md:text-4xl font-semibold heading-gradient">System Overview</h2>
-        <p className="mt-3 text-white/70">A concise map of the core components powering autonomous trading.</p>
+        <p className="mt-3 text-white/70">A concise map of the core components powering autonomous betting.</p>
       </div>
 
       <motion.div

@@ -8,7 +8,7 @@ export default function Footer() {
         {/* Brand + Accent Dot */}
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_10px_3px_rgba(6,214,160,0.5)]" />
-          <span className="font-medium text-white/80">AI Trading & Prediction System</span>
+          <span className="font-medium text-white/80">AI Betting & Prediction System</span>
         </div>
 
         {/* Navigation Links */}
@@ -20,7 +20,7 @@ export default function Footer() {
 
         {/* Copyright */}
         <div className="text-white/50 tracking-wide">
-          © {new Date().getFullYear()} AI Trading System
+          © {new Date().getFullYear()} AI Betting System
         </div>
       </div>
 

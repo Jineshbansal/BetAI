@@ -17,10 +17,10 @@ function Hero() {
     <section className="relative mx-auto max-w-5xl px-6 pt-16 text-center">
       <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
         <motion.h1 variants={item} className="text-3xl md:text-5xl font-semibold tracking-tight">
-          AI Trading & Prediction System
+          AI Betting & Prediction System
         </motion.h1>
         <motion.p variants={item} className="mx-auto max-w-3xl text-base md:text-lg text-white/70">
-          An autonomous AI-driven trading ecosystem integrating market data, strategy generation, and decentralized
+          An autonomous AI-driven betting ecosystem integrating market data, strategy generation, and decentralized
           execution on Polymarket via Hedera.
         </motion.p>
         <motion.div variants={item} className="mx-auto mt-4 h-px w-40 bg-gradient-to-r from-transparent via-accent to-transparent opacity-60" />

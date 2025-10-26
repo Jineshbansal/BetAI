@@ -309,8 +309,8 @@ def run_backtest(markets=None, initial_capital=1000, bet_size_percent=10):
 def generate_signal(question, data_sources, risk_level, market_price=0.65, backtest_context=None):
     """Generate trading signal based on question and data sources"""
     
-    # 1. Pull live news from NewsAPI
-    news_lines = get_news_lines(question, max_items=6)
+    # 1. Pull live news from NewsAPI (limit to 2 lines for token efficiency)
+    news_lines = get_news_lines(question, max_items=2)
     
     # 2. Always include fallback/reference data (market indicators)
     reference_data = [
@@ -324,10 +324,10 @@ def generate_signal(question, data_sources, risk_level, market_price=0.65, backt
     # 3. Combine all data sources
     all_context_lines = []
     
-    # Add news if available
+    # Add news if available (limited to 2 lines)
     if news_lines:
         all_context_lines.append("📰 Latest News:")
-        all_context_lines.extend([f"  - {line}" for line in news_lines])
+        all_context_lines.extend([f"  - {line}" for line in news_lines[:2]])
     
     # Always add reference market data
     all_context_lines.append("\n📊 Market Indicators:")
@@ -335,10 +335,13 @@ def generate_signal(question, data_sources, risk_level, market_price=0.65, backt
     
     context = "\n".join(all_context_lines)
     
-    # Add backtest context if available
+    # Add backtest context if available (limited to 3 lines)
     backtest_summary = ""
     if backtest_context:
-        backtest_summary = format_backtest_summary(backtest_context)
+        full_summary = format_backtest_summary(backtest_context)
+        # Limit to first 3 lines for token efficiency
+        summary_lines = full_summary.split('\n')[:3]
+        backtest_summary = '\n'.join(summary_lines)
     
     prompt = f"""
     You are a market prediction AI agent. You MUST respond with ONLY valid JSON.

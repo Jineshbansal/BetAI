@@ -33,11 +33,23 @@ export default function Dashboard() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ initialCapital: 1000, betSizePercent: 10 }),
         })
+        if (!backtestRes.ok) {
+          throw new Error(`Backtest API failed: ${backtestRes.status} ${backtestRes.statusText}`)
+        }
         const backtest = await backtestRes.json()
+        if (!backtest.success) {
+          throw new Error(backtest.error || 'Backtest failed')
+        }
 
         // 2) Fetch resolved markets to compute user stats from recorded investments
         const marketsRes = await fetch('http://localhost:5000/api/backtest/markets')
+        if (!marketsRes.ok) {
+          throw new Error(`Markets API failed: ${marketsRes.status} ${marketsRes.statusText}`)
+        }
         const marketsJson = await marketsRes.json()
+        if (!marketsJson.success) {
+          throw new Error(marketsJson.error || 'Failed to fetch markets')
+        }
         const resolved = marketsJson?.markets || []
 
         // 3) Read investments from localStorage
@@ -90,7 +102,8 @@ export default function Dashboard() {
           setPnlSeries({ labels: paddedLabels, user: paddedUser, ai: paddedAi, joint })
         }
       } catch (e) {
-        if (!cancelled) setError(String(e?.message || e))
+        console.error('Dashboard load error:', e)
+        if (!cancelled) setError(e?.message || String(e) || 'Failed to load dashboard data')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -178,7 +191,10 @@ export default function Dashboard() {
       <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:0.25}} className="mt-8">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-semibold">Recent Investments</h3>
-          <a href="#all-investments" className="px-4 py-2 rounded-lg font-medium bg-accent text-gray-900 hover:brightness-110 transition-colors">View full list</a>
+          <div className="flex gap-2">
+            <a href="/bets" className="px-4 py-2 rounded-lg font-medium bg-accent text-gray-900 hover:brightness-110 transition-colors">Manage All Bets</a>
+            <a href="#all-investments" className="px-4 py-2 rounded-lg font-medium bg-white/10 text-white hover:bg-white/20 transition-colors">View full list</a>
+          </div>
         </div>
         <div className="overflow-hidden rounded-xl border border-white/10">
           <table className="min-w-full divide-y divide-white/10">

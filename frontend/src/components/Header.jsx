@@ -6,7 +6,7 @@ export default function Header() {
   const [open, setOpen] = useState(false)
   const links = [
     { label: 'Home', to: '/' },
-    { label: 'Dashboard', to: '/dashboard' },
+    { label: 'My Bets', to: '/bets' },
     { label: 'Prediction Market', to: '/prediction-market' },
     { label: 'Predict Output', to: '/predict-output' },
   ]
@@ -15,7 +15,7 @@ export default function Header() {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link to="/" className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_20px_6px_rgba(6,214,160,0.55)]" />
-          <span className="text-sm font-medium tracking-wider text-accent">AI TRADING</span>
+          <span className="text-sm font-medium tracking-wider text-accent">BET AI</span>
         </Link>
         <div className="hidden items-center gap-6 md:flex">
           <nav className="flex items-center gap-6 text-sm">

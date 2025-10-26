@@ -11,6 +11,7 @@ import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
 import Contact from './pages/Contact'
 import PredictOutput from './pages/PredictOutput'
+import Dashboard from './pages/Dashboard'
 import Backtesting from './pages/Backtesting'
 
 const router = createBrowserRouter([
@@ -18,6 +19,7 @@ const router = createBrowserRouter([
     element: <App />, // layout
     children: [
       { path: '/', element: <Home /> },
+  { path: '/dashboard', element: <Dashboard /> },
       { path: '/backtesting', element: <Backtesting /> },
       {
         element: <RequireWallet />,

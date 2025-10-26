@@ -33,7 +33,10 @@ def main():
     
     # Start the server
     try:
-        subprocess.run([sys.executable, "index.py"], check=True)
+        here = os.path.dirname(os.path.abspath(__file__))
+        index_path = os.path.join(here, "index.py")
+        # Run index.py from the backend folder to ensure relative imports/paths work
+        subprocess.run([sys.executable, index_path], check=True, cwd=here)
     except KeyboardInterrupt:
         print("\nServer stopped by user")
     except subprocess.CalledProcessError as e:

@@ -6,7 +6,7 @@ export default function Header() {
   const [open, setOpen] = useState(false)
   const links = [
     { label: 'Home', to: '/' },
-    { label: 'Backtesting', to: '/backtesting' },
+    { label: 'Dashboard', to: '/dashboard' },
     { label: 'Prediction Market', to: '/prediction-market' },
     { label: 'Predict Output', to: '/predict-output' },
   ]

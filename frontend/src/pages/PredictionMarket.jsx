@@ -6,6 +6,7 @@ import { CONTRACT_ADDRESS, contractABI, HEDERA_CONTRACT_ID, HEDERA_TESTNET_CHAIN
 import PredictionGrid from '../components/PredictionGrid'
 import ResolveTab from '../components/ResolveTab'
 import { Client, ContractExecuteTransaction, Hbar, ContractFunctionParameters, PrivateKey, AccountId } from '@hashgraph/sdk'
+import { addInvestment } from '../lib/dashboardStore'
 
 export default function PredictionMarket() {
   const { account, signer, chainId } = useWallet()
@@ -418,6 +419,16 @@ export default function PredictionMarket() {
       if (!status.includes('SUCCESS')) throw new Error(`Transaction failed: ${status}`)
 
       await fetchAllQuestions()
+      try {
+        const q = (questions || []).find(x => String(x.id) === String(qId))
+        addInvestment({
+          role: 'User',
+          questionId: Number(qId),
+          question: q?.question || '',
+          outcomeIndex: Number(optionIndex),
+          amountHBAR: Number(amountHBAR || 0),
+        })
+      } catch {}
     } catch (e) {
       const msg = normalizeErr(e)
       if (/INVALID_SIGNATURE/i.test(msg)) {

@@ -10,6 +10,7 @@ import {
   PrivateKey,
   AccountId
 } from "@hashgraph/sdk";
+import { addInvestment } from '../lib/dashboardStore'
 
 export default function PredictOutput() {
   const { signer, account } = useWallet()
@@ -35,6 +36,12 @@ export default function PredictOutput() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [includeBacktest, setIncludeBacktest] = useState(false)
   const [backtestSummary, setBacktestSummary] = useState(null)
+  // Chat state
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMessages, setChatMessages] = useState([]) // {role:'user'|'assistant', text:string}
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState('')
   
   const intervalRef = useRef(null)
   const BACKEND_URL = 'http://localhost:5000'
@@ -65,6 +72,41 @@ export default function PredictOutput() {
       setDataSources(dataSources.filter(s => s !== source))
     } else {
       setDataSources([...dataSources, source])
+    }
+  }
+
+  // --- Hedera Agent Chat ---
+  const sendChat = async () => {
+    const text = chatInput.trim()
+    if (!text) return
+    setChatError('')
+    setChatLoading(true)
+    const newMsgs = [...chatMessages, { role: 'user', text }]
+    setChatMessages(newMsgs)
+    setChatInput('')
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/agent-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: text })
+      })
+      const data = await res.json()
+      if (!data?.success) {
+        throw new Error(data?.error || 'Agent error')
+      }
+      // Extract a readable answer
+      let reply = ''
+      const agent = data.agent || {}
+      // Langchain executor typically returns an object with output field
+      if (typeof agent.result === 'string') reply = agent.result
+      else if (agent?.result?.output) reply = agent.result.output
+      else if (agent?.result?.output_text) reply = agent.result.output_text
+      else reply = JSON.stringify(agent, null, 2)
+      setChatMessages(prev => [...prev, { role: 'assistant', text: reply }])
+    } catch (e) {
+      setChatError(String(e.message || e))
+    } finally {
+      setChatLoading(false)
     }
   }
 
@@ -278,6 +320,15 @@ export default function PredictOutput() {
       console.log("✅ Transaction status:", receipt.status.toString());
   
       if (receipt.status.toString() === "SUCCESS") {
+        try {
+          addInvestment({
+            role: spendingMode === 'auto' ? 'AI' : 'User',
+            questionId,
+            question: (selectedQuestion || customQuestion || ''),
+            outcomeIndex,
+            amountHBAR: Number(betAmount || 0),
+          })
+        } catch {}
         alert("Bet placed successfully!");
         return true;
       } else {
@@ -766,6 +817,61 @@ export default function PredictOutput() {
             </div>
           )}
         </div>
+      </motion.div>
+
+      {/* Hedera Agent Chat (beta) */}
+      <motion.div
+        initial={{opacity:0,y:8}}
+        animate={{opacity:1,y:0}}
+        transition={{delay:0.52}}
+        className="mt-6 rounded-lg border border-white/10 bg-white/5"
+      >
+        <div className="p-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">7. Hedera Agent Chat (beta)</h3>
+            <button
+              onClick={() => setChatOpen(v => !v)}
+              className="px-3 py-1.5 rounded-md border border-white/10 hover:border-white/20 text-sm"
+            >
+              {chatOpen ? 'Hide' : 'Open'}
+            </button>
+          </div>
+          <p className="text-sm text-white/60 mt-1">Ask the on-chain agent to execute tasks like placing bets. Requires server env vars: GROQ_API_KEY, HEDERA_ACCOUNT_ID, HEDERA_PRIVATE_KEY.</p>
+        </div>
+        {chatOpen && (
+          <div className="border-t border-white/10">
+            <div className="max-h-64 overflow-y-auto p-4 space-y-3">
+              {chatMessages.length === 0 && (
+                <div className="text-sm text-white/50">No messages yet. Try: “Place a bet of 5 HBAR on contract 0.0.7100616 for question 1, outcome 0”.</div>
+              )}
+              {chatMessages.map((m, i) => (
+                <div key={i} className={`text-sm ${m.role==='user'?'text-white/90':'text-accent'}`}>
+                  <span className="text-white/40 mr-2">{m.role==='user'?'You':'Agent'}:</span>
+                  <span className="whitespace-pre-wrap break-words">{m.text}</span>
+                </div>
+              ))}
+              {chatLoading && <div className="text-xs text-white/60">Thinking…</div>}
+              {chatError && <div className="text-xs text-red-300">{chatError}</div>}
+            </div>
+            <div className="p-4 flex items-center gap-2 border-t border-white/10">
+              <input
+                className="flex-1 p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-accent focus:outline-none"
+                placeholder="Type a prompt for the Hedera agent…"
+                value={chatInput}
+                onChange={(e)=>setChatInput(e.target.value)}
+                onKeyDown={(e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendChat(); } }}
+                disabled={chatLoading}
+              />
+              <button
+                onClick={sendChat}
+                disabled={!chatInput.trim() || chatLoading}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${!chatInput.trim() || chatLoading ? 'bg-gray-600 cursor-not-allowed text-white/50' : 'bg-accent text-gray-900 hover:brightness-110'}`}
+              >
+                {chatLoading?'Sending…':'Send'}
+              </button>
+            </div>
+          </div>
+        )}
       </motion.div>
 
       {/* Autonomous Execution Controls */}

@@ -1,4 +1,5 @@
 import React from 'react'
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import FeatureGrid from '../components/FeatureGrid'
 
@@ -23,6 +24,20 @@ function Hero() {
           execution on Polymarket via Hedera.
         </motion.p>
         <motion.div variants={item} className="mx-auto mt-4 h-px w-40 bg-gradient-to-r from-transparent via-accent to-transparent opacity-60" />
+        <motion.div variants={item} className="mt-6 flex items-center justify-center gap-3">
+          <Link
+            to="/prediction-market"
+            className="px-5 py-2 rounded-lg font-medium bg-accent text-gray-900 hover:brightness-110 transition-colors"
+          >
+            Go to Markets
+          </Link>
+          <Link
+            to="/dashboard"
+            className="px-5 py-2 rounded-lg font-medium border border-accent/60 text-accent hover:bg-accent/10 transition-colors"
+          >
+            View Dashboard
+          </Link>
+        </motion.div>
       </motion.div>
     </section>
   )

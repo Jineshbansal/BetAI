@@ -620,5 +620,74 @@ def health_check():
     """Health check endpoint"""
     return jsonify({"status": "healthy", "message": "Backend is running"})
 
+@app.route('/api/agent-chat', methods=['POST'])
+def api_agent_chat():
+    """Proxy endpoint to run the Node-based Hedera Agent with a prompt and return its JSON output.
+    Expects: { "prompt": "..." }
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        prompt = (data.get('prompt') or '').strip()
+        if not prompt:
+            return jsonify({"success": False, "error": "prompt is required"}), 400
+
+        # Locate the hedera_agent.js under the frontend folder
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+        agent_path = os.path.join(repo_root, 'frontend', 'src', 'pages', 'hedera_agent.js')
+        if not os.path.exists(agent_path):
+            return jsonify({"success": False, "error": f"Agent file not found at {agent_path}"}), 500
+
+        # Prepare environment: pass through existing env plus map Vite keys if present
+        env = os.environ.copy()
+        # Map VITE_* to agent expected vars if available
+        if not env.get('HEDERA_ACCOUNT_ID') and env.get('VITE_MY_ACCOUNT_ID'):
+            env['HEDERA_ACCOUNT_ID'] = env['VITE_MY_ACCOUNT_ID']
+        if not env.get('HEDERA_PRIVATE_KEY') and env.get('VITE_MY_PRIVATE_KEY'):
+            env['HEDERA_PRIVATE_KEY'] = env['VITE_MY_PRIVATE_KEY']
+
+        # Node command
+        node_cmd = ['node', agent_path, prompt]
+        import subprocess
+        # Run from repo root so ESM imports resolve and node can find dependencies in frontend
+        result = subprocess.run(
+            node_cmd,
+            cwd=os.path.join(repo_root, 'frontend'),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+
+        stdout = (result.stdout or '').strip()
+        stderr = (result.stderr or '').strip()
+
+        if result.returncode != 0:
+            return jsonify({"success": False, "error": "Agent process failed", "stderr": stderr}), 500
+
+        # Try to parse stdout as JSON
+        try:
+            output = json.loads(stdout)
+        except Exception:
+            # In case agent prints other logs, try to extract JSON object
+            start = stdout.find('{')
+            end = stdout.rfind('}') + 1
+            if start != -1 and end > start:
+                try:
+                    output = json.loads(stdout[start:end])
+                except Exception as e:
+                    return jsonify({"success": False, "error": f"Failed to parse agent output: {str(e)}", "raw": stdout}), 500
+            else:
+                return jsonify({"success": False, "error": "No JSON output from agent", "raw": stdout}), 500
+
+        return jsonify({"success": True, "agent": output})
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Agent timed out"}), 504
+    except FileNotFoundError as e:
+        # node not found
+        return jsonify({"success": False, "error": f"Node runtime not found: {str(e)}"}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

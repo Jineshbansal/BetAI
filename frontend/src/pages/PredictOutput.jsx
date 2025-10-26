@@ -11,6 +11,7 @@ import {
   AccountId
 } from "@hashgraph/sdk";
 import { addInvestment } from '../lib/dashboardStore'
+import { CONTRACT_ADDRESS, contractABI, HEDERA_TESTNET_RPC } from '../contracts/config'
 
 export default function PredictOutput() {
   const { signer, account } = useWallet()
@@ -46,6 +47,11 @@ export default function PredictOutput() {
   const intervalRef = useRef(null)
   const BACKEND_URL = 'http://localhost:5000'
 
+  // On-chain questions (from PredictionMarket contract)
+  const [questions, setQuestions] = useState([])
+  const [loadingQuestions, setLoadingQuestions] = useState(false)
+  const [questionsError, setQuestionsError] = useState('')
+
   // Available data sources
   const availableDataSources = [
     'CoinMarketCap',
@@ -58,14 +64,6 @@ export default function PredictOutput() {
     'News API'
   ]
 
-  // Pre-defined profitable questions
-  const profitableQuestions = [
-    'Which cryptocurrency has the highest growth potential in the next 24 hours?',
-    'What are the best DeFi tokens to invest in right now?',
-    'Which NFT collections show promising trading volume?',
-    'What are the most undervalued altcoins currently?',
-    'Which trading pairs have the best arbitrage opportunities?'
-  ]
 
   const handleDataSourceToggle = (source) => {
     if (dataSources.includes(source)) {
@@ -74,6 +72,57 @@ export default function PredictOutput() {
       setDataSources([...dataSources, source])
     }
   }
+
+  // --- Fetch on-chain questions (read-only) ---
+  async function getQuestionByIdRO(c, id) {
+    try {
+      const res = await c.getMarket(BigInt(id))
+      return {
+        id,
+        question: res[0],
+      }
+    } catch (e) {
+      try {
+        const q = await c.questions(BigInt(id))
+        return { id, question: q[0] }
+      } catch {
+        return null
+      }
+    }
+  }
+
+  async function fetchAllQuestionsRO() {
+    setLoadingQuestions(true)
+    setQuestionsError('')
+    try {
+      const roProvider = new ethers.JsonRpcProvider(HEDERA_TESTNET_RPC)
+      const c = new ethers.Contract(CONTRACT_ADDRESS, contractABI, roProvider)
+      const counter = await c.questionCounter().catch(() => 0n)
+      const n = Number(counter || 0n)
+      const items = []
+      for (let i = 0; i < n; i++) {
+        const q = await getQuestionByIdRO(c, i)
+        if (q && q.question) items.push(q)
+      }
+      // Fallback 1-indexed if nothing found
+      if (items.length === 0) {
+        for (let i = 1; i <= n; i++) {
+          const q = await getQuestionByIdRO(c, i)
+          if (q && q.question) items.push(q)
+        }
+      }
+      setQuestions(items)
+    } catch (e) {
+      setQuestionsError(e?.message || String(e))
+    } finally {
+      setLoadingQuestions(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchAllQuestionsRO().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // --- Hedera Agent Chat ---
   const sendChat = async () => {
@@ -120,10 +169,7 @@ export default function PredictOutput() {
     }
   }
 
-  const handleQuestionSelect = (question) => {
-    setSelectedQuestion(question)
-    setCustomQuestion('')
-  }
+  
 
   const handleCustomQuestionChange = (e) => {
     setCustomQuestion(e.target.value)
@@ -600,28 +646,38 @@ export default function PredictOutput() {
         className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
       >
         <h3 className="text-lg font-semibold mb-4">3. Analysis Focus</h3>
-        
-        {/* Pre-defined Questions */}
+        {/* On-chain Questions (from contract) */}
         <div className="mb-6">
-          <label className="text-sm text-white/60 mb-3 block">
-            Choose a pre-defined profitable question (Recommended for best results):
-          </label>
-          <div className="space-y-2">
-            {profitableQuestions.map((question, index) => (
-              <button
-                key={index}
-                onClick={() => handleQuestionSelect(question)}
-                className={`w-full text-left p-3 rounded-lg border transition-all ${
-                  selectedQuestion === question
-                    ? 'border-accent bg-accent/20 text-white'
-                    : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
-                }`}
-              >
-                {question}
-              </button>
-            ))}
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm text-white/60">On-chain Markets (click to select):</label>
+            {loadingQuestions && <span className="text-xs text-white/50">Loading…</span>}
           </div>
+          {questionsError && (
+            <div className="mb-2 text-xs text-red-300">{questionsError}</div>
+          )}
+          {questions.length > 0 ? (
+            <div className="space-y-2">
+              {questions.map((q) => (
+                <button
+                  key={q.id}
+                  onClick={() => { setSelectedQuestion(q.question); setCustomQuestion(''); setQuestionId(q.id) }}
+                  className={`w-full text-left p-3 rounded-lg border transition-all ${
+                    selectedQuestion === q.question
+                      ? 'border-accent bg-accent/20 text-white'
+                      : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
+                  }`}
+                >
+                  <span className="text-xs text-white/50 mr-2">#{q.id}</span>
+                  {q.question}
+                </button>
+              ))}
+            </div>
+          ) : (
+            !loadingQuestions && <div className="text-sm text-white/50">No markets found on-chain.</div>
+          )}
         </div>
+        
+        
 
         {/* Custom Question */}
         <div>

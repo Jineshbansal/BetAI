@@ -79,6 +79,34 @@ Smart Contract (Hedera Parimutuel Market)
 ```
 
 ---
+## 🔗 Integrations
+
+### Envio
+We leverage Envio's real-time blockchain indexing infrastructure to provide instant access to prediction market data without overloading our frontend with constant RPC calls. Here's how it powers BetAI:
+
+When smart contract events fire on Hedera — whether it's a `BetPlaced`, `QuestionAdded`, `MarketResolved`, or `WinningsClaimed` — Envio's indexer automatically captures and structures this data through custom event handlers. Instead of polling the blockchain repeatedly or managing complex state synchronization, we simply query Envio's GraphQL API to fetch exactly what we need.
+
+**Why does this matter?** Because real-time data access is critical for a prediction market:
+
+- **Lightning-fast UI updates** — Users see new bets, market resolutions, and winnings instantly without refresh delays or stale data.
+- **Scalable queries** — No need to scan thousands of blocks or replay transaction history. Envio's indexed database handles complex aggregations and filters effortlessly.
+- **Developer-friendly GraphQL API** — Our frontend fetches structured data with precise queries like "show me all bets for question #5" or "get the total pool for each outcome" in milliseconds.
+- **Network efficiency** — Instead of hammering Hedera's RPC endpoints with redundant calls, we offload heavy lifting to Envio's infrastructure, keeping our app fast and our API limits safe.
+
+The indexer runs continuously in the background, listening to our `ParimutuelPredictionMarket` contract on Hedera Testnet (chain ID 296). Event handlers in `EventHandlers.js` process each event and store normalized entities like `BetPlaced`, `MarketResolved`, etc., which are then queryable through GraphQL. This architecture ensures that BetAI remains responsive, data-accurate, and ready to scale as more users place bets and markets grow.
+
+### Hedera
+We use three key features of the Hedera blockchain: **Smart Contracts**, the **Hedera Agent Kit**, and **Hedera's native speed and finality**.
+
+**Smart Contracts:** At the core of BetAI is our `ParimutuelPredictionMarket` contract deployed on Hedera Testnet. When an oracle creates a prediction market (e.g., "Will BTC hit $70K by next week?"), they call `addQuestion()` on-chain, establishing the outcomes, end time, and betting parameters. Users then place bets by invoking `placeBet()` with HBAR, which is converted to tinybars and locked into the contract's pool. Once the event concludes, the oracle resolves the market via `resolveMarket()`, determining the winning outcome. Winners can then claim their proportional share of the total pool using `claimWinnings()`. This makes the entire betting lifecycle transparent, immutable, and trustless — no centralized intermediary can manipulate results or withhold funds.
+
+**Hedera Agent Kit:** Beyond manual betting, BetAI features an **AI-powered autonomous agent** built with the Hedera Agent Kit and LangChain integration. This agent doesn't just analyze markets — it can execute blockchain operations on behalf of users. Through natural language commands like "Place a 10 HBAR bet on outcome 0 for question 1," the agent translates user intent into actual contract calls using `ContractExecuteTransaction`. The Hedera Agent Kit provides pre-built tools for querying account balances, transaction history, and contract state, while our custom `placeBetTool` handles bet placement logic. This enables **autonomous trading mode**, where the AI evaluates confidence signals, news sentiment, and backtesting results to make strategic bets without manual intervention — turning BetAI into a hybrid prediction-trading platform.
+
+**Speed and Finality:** Hedera's consensus mechanism delivers near-instant finality (typically 3-5 seconds), meaning bets are confirmed, markets are resolved, and winnings are claimed without the agonizing wait times of traditional blockchains. This is critical for time-sensitive prediction markets where odds shift rapidly and users expect immediate feedback. Additionally, Hedera's low and predictable fees (fractions of a cent per transaction) ensure that even small bets remain economically viable, unlike Ethereum-based markets where gas fees can exceed the bet itself.
+
+Together, these features ensure that BetAI delivers not just decentralized betting and AI-driven insights, but also real-time responsiveness, transparent on-chain settlement, and autonomous execution capabilities — all powered by Hedera's enterprise-grade infrastructure.
+
+---
 
 ## ⚙️ Environment Variables
 

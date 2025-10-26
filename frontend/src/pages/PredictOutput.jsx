@@ -43,6 +43,8 @@ export default function PredictOutput() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState('')
+  const [selectedModel, setSelectedModel] = useState('gpt-4'); // Default model
+
   
   const intervalRef = useRef(null)
   const BACKEND_URL = 'http://localhost:5000'
@@ -51,6 +53,12 @@ export default function PredictOutput() {
   const [questions, setQuestions] = useState([])
   const [loadingQuestions, setLoadingQuestions] = useState(false)
   const [questionsError, setQuestionsError] = useState('')
+
+  const availableModels = [
+    { id: 'gpt-4', name: 'GPT-4 (High Accuracy)' },
+    { id: 'gpt-3.5', name: 'GPT-3.5 (Faster, Lower Cost)' },
+    { id: 'grok', name: 'llama-3.3-70b-versatile' },
+  ];
 
   // Available data sources
   const availableDataSources = [
@@ -638,6 +646,37 @@ export default function PredictOutput() {
         )}
       </motion.div>
 
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35 }}
+        className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
+      >
+        <h3 className="text-lg font-semibold mb-4">3. Select Agent Model</h3>
+        <label className="text-sm text-white/60 mb-4 block">
+          Choose the AI model for generating predictions:
+        </label>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {availableModels.map((model) => (
+            <button
+              key={model.id}
+              onClick={() => setSelectedModel(model.id)}
+              className={`p-4 rounded-lg border transition-all ${
+                selectedModel === model.id
+                  ? 'border-accent bg-accent/20 text-white'
+                  : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
+              }`}
+            >
+              <div className="font-semibold">{model.name}</div>
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 text-sm text-white/80">
+          Selected Model: <span className="font-medium">{availableModels.find((m) => m.id === selectedModel)?.name}</span>
+        </div>
+      </motion.div>
+      
+
       {/* Trading Question */}
       <motion.div 
         initial={{opacity:0,y:8}} 
@@ -645,7 +684,7 @@ export default function PredictOutput() {
         transition={{delay:0.4}}
         className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
       >
-        <h3 className="text-lg font-semibold mb-4">3. Analysis Focus</h3>
+        <h3 className="text-lg font-semibold mb-4">4. Analysis Focus</h3>
         {/* On-chain Questions (from contract) */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
@@ -734,7 +773,7 @@ export default function PredictOutput() {
         className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
       >
         <div className="flex items-center justify-between gap-3 mb-3">
-          <h3 className="text-lg font-semibold">4. News Context Preview</h3>
+          <h3 className="text-lg font-semibold">5. News Context Preview</h3>
           <div className="flex items-center gap-2">
             <button
               onClick={fetchNewsContext}
@@ -822,7 +861,7 @@ export default function PredictOutput() {
         transition={{delay:0.5}}
         className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
       >
-  <h3 className="text-lg font-semibold mb-4">5. Execution Mode</h3>
+  <h3 className="text-lg font-semibold mb-4">6. Execution Mode</h3>
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row gap-4">
             <button

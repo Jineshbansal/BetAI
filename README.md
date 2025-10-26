@@ -1,118 +1,145 @@
-# Polymarket AI Agent UI
 
-A modern React + Vite single-page app with Tailwind CSS and Framer Motion. Includes wallet connect (MetaMask/EIP-1193), guarded routes, and a polished, responsive UI with a feature grid, header, and footer.
+# 🧠 **Bet AI – Decentralized AI-Powered Prediction Market**
 
-## Features
+![Hedera](https://img.shields.io/badge/Hedera-Blockchain-blue)
+![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-green)
+![Python](https://img.shields.io/badge/Backend-Flask%20%2B%20Groq-yellow)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-- Clean, responsive design on a dark slate background (#0f172a) with a teal accent (#06d6a0)
-- Framer Motion animations for page and card reveals
-- Client-side routing (react-router-dom) with a shared layout (Header/Footer)
-- Connect Wallet (MetaMask): shows address and native balance, auto-connect option, and disconnect
-- Guarded routes: protected pages require a connected wallet; shows a single notice then redirects
-- Modal connect sheet rendered via a portal so it always overlays correctly
-- Legal pages (Privacy, Terms) and a Contact page
-- Sensible .gitignore and .gitattributes for Windows-friendly Git usage
+> **Bet AI** is a decentralized prediction market powered by **Hedera Hashgraph** and **AI-driven analytics**.  
+> It allows users to place and resolve bets using real-time AI-generated market signals for transparency and trust.
 
-## Tech stack
+---
 
-- React 18 (Vite)
-- Tailwind CSS
-- Framer Motion
-- react-router-dom
-- lucide-react (icons)
-- EIP-1193 provider (MetaMask) for wallet integration
+## 🏗️ **Architecture Overview**
 
-## Quick start (Windows PowerShell)
+<img width="1667" height="834" alt="image" src="https://github.com/user-attachments/assets/8ec411f4-72d5-4af3-a7f0-e8e19c3a9fa6"/>
 
-- Prereqs: Node.js 18+ and npm
+**Core Workflow:**
+1. **Frontend (React + Vite):** Wallet connection, prediction creation, dashboard visualization.  
+2. **Backend (Flask):** Fetches live news, processes GROQ-based AI reasoning, generates prediction signals.  
+3. **Smart Contract (Hedera):** Stores market states, user bets, and resolves outcomes.  
+4. **AI Agent:** Analyzes sentiment and returns insights to backend endpoints.  
 
-Install dependencies:
+---
 
-```powershell
-npm install
+## 📁 **Project Structure**
+```bash
+d:\ETHGlobal
+├─ frontend
+│  ├─ package.json
+│  ├─ vite.config.js
+│  ├─ .env.local                 (dev secrets: VITE_MY_ACCOUNT_ID, VITE_MY_PRIVATE_KEY)
+│  ├─ public
+│  │  └─ index.html
+│  └─ src
+│     ├─ main.jsx
+│     ├─ App.jsx
+│     ├─ contracts
+│     │  └─ config.js            (HEDERA_CONTRACT_ID, chainId, RPC)
+│     ├─ contexts
+│     │  ├─ WalletContext.jsx
+│     │  └─ HashConnectContext.jsx
+│     ├─ components
+│     │  ├─ Header.jsx
+│     │  ├─ PredictionGrid.jsx
+│     │  └─ ResolveTab.jsx
+│     ├─ lib
+│     │  ├─ dashboardStore.js
+│     │  └─ hedera
+│     │     └─ placeBet.js
+│     └─ pages
+│        ├─ Home.jsx
+│        ├─ Dashboard.jsx
+│        ├─ PredictionMarket.jsx
+│        └─ PredictOutput.jsx
+│
+├─ backend
+│  ├─ index.py                   (Flask app: /api/news-context, /api/generate-signal, /api/agent-chat)
+│  ├─ start_server.py
+│  ├─ new.py                     (NewsAPI helpers; prints JSON when run directly)
+│  ├─ requirements.txt
+│  └─ .env                       (NEWS_API_KEY, GROQ_API_KEY, optional HEDERA_*)
+│
+└─ Contracts
+   └─ PredictionMarket.sol
 ```
 
-Start the dev server:
+---
 
-```powershell
+## ⚙️ **Setup Guide**
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/yourusername/bet-ai.git
+cd bet-ai
+```
+
+### 2. Configure Environment Variables
+**Frontend (`frontend/.env.local`):**
+```
+VITE_MY_ACCOUNT_ID=0.0.xxxxx
+VITE_MY_PRIVATE_KEY=302e...
+```
+
+**Backend (`backend/.env`):**
+```
+NEWS_API_KEY=your_news_api_key
+GROQ_API_KEY=your_groq_key
+HEDERA_CONTRACT_ID=0.0.xxxxx
+```
+
+### 3. Install Dependencies
+```bash
+cd frontend && npm install
+cd ../backend && pip install -r requirements.txt
+```
+
+### 4. Run Services
+```bash
+# Backend (Flask)
+python start_server.py
+
+# Frontend (Vite)
 npm run dev
 ```
 
-Build for production:
+---
 
-```powershell
-npm run build
-```
+## 🌐 **Endpoints (Backend Flask API)**
 
-Preview the production build locally:
+| Endpoint | Description |
+|-----------|--------------|
+| `/api/news-context` | Fetches contextual news for sentiment analysis |
+| `/api/generate-signal` | Generates AI prediction signal via GROQ |
+| `/api/agent-chat` | Chat endpoint for interactive market queries |
 
-```powershell
-npm run preview
-```
+---
 
-## Project structure
+## 💡 **Features**
+- 🤖 **AI-Driven Prediction Signals** (via GROQ API)
+- 🌐 **Hedera Smart Contract Integration**
+- 🧾 **Automated Bet Resolution**
+- 📊 **Dashboard for Market Insights**
+- 🧱 **Modular React + Flask Architecture**
 
-```
-. 
-├─ src/
-│  ├─ App.jsx                # Layout with Header, Outlet, Footer
-│  ├─ main.jsx               # Router + WalletProvider wiring
-│  ├─ index.css              # Tailwind base and custom utilities
-│  ├─ components/
-│  │  ├─ Header.jsx          # Top navigation + Connect Wallet
-│  │  ├─ Footer.jsx          # Footer with links
-│  │  ├─ FeatureGrid.jsx     # Animated feature cards (3×2)
-│  │  └─ ConnectButton.jsx   # Modal-based wallet connect UI
-│  ├─ contexts/
-│  │  └─ WalletContext.jsx   # EIP-1193 MetaMask connect + balance
-│  ├─ routes/
-│  │  └─ RequireWallet.jsx   # Guarded-route wrapper
-│  ├─ pages/
-│  │  ├─ Home.jsx
-│  │  ├─ PredictionMarket.jsx
-│  │  ├─ CustomAgent.jsx
-│  │  ├─ Privacy.jsx
-│  │  ├─ Terms.jsx
-│  │  └─ Contact.jsx
-│  └─ ...
-├─ index.html
-├─ tailwind.config.js
-├─ postcss.config.js
-├─ vite.config.js
-├─ .gitignore
-├─ .gitattributes
-└─ package.json
-```
+---
 
-## Scripts
+## 🧩 **Tech Stack**
+| Layer | Technology |
+|--------|-------------|
+| Frontend | React, Vite, TailwindCSS |
+| Backend | Python, Flask, Groq API |
+| Blockchain | Hedera Hashgraph |
+| Smart Contracts | Solidity |
+| Database | Hedera State Service / LocalStore |
 
-- `npm run dev` – Start the Vite dev server
-- `npm run build` – Build production assets to `dist/`
-- `npm run preview` – Preview the built app locally
+---
 
-## Wallet usage
+## 🧾 **License**
+This project is licensed under the [MIT License](LICENSE).
 
-- Click “Connect Wallet” in the header, pick MetaMask
-- When connected, your shortened address and native balance (ETH) are shown
-- Toggle “Auto-connect next time” to remember your choice using localStorage
-- Use “Disconnect” to clear the session (EIP-1193 doesn’t support a programmatic disconnect; this clears local state)
-- Guarded pages (e.g., Prediction Market, Custom AI Agent) require a connected wallet; if not connected, a one-time notice appears and you’re redirected to Home
+---
 
-## Styling
-
-- Tailwind utility-first classes with a custom palette
-- A few custom utilities (e.g., gradient rings and subtle glows) are defined in `src/index.css`
-
-## Troubleshooting
-
-- MetaMask not detected: Ensure the extension is installed and enabled in your browser
-- Alert shows twice while blocking a route: Dev builds with React Strict Mode can double-mount. The guard uses sessionStorage to limit the alert to once per navigation
-- Balance reads as 0: Ensure the selected MetaMask account has a balance on the active chain. Switching chains updates the balance automatically
-- Port already in use: Stop the process using the port or set a different port for Vite
-- Line endings in Git on Windows: `.gitattributes` normalizes endings to LF for source files and CRLF for batch files
-
-## Deployment
-
-- Run `npm run build` and serve the `dist/` folder via any static host (Netlify, Vercel, GitHub Pages, Nginx, etc.)
-- For a quick local check, `npm run preview` starts a static server to preview `dist/`
-
+### 💬 **Developed for ETHGlobal Hackathon 2025**  
+Built by innovators exploring the synergy between **AI + Blockchain + Prediction Markets**.

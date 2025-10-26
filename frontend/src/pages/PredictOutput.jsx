@@ -28,6 +28,13 @@ export default function PredictOutput() {
   const [nextSignalTime, setNextSignalTime] = useState(null)
   const [betAmount, setBetAmount] = useState('10') // Default bet amount in HBAR
   const [questionId, setQuestionId] = useState(1) // Default question ID for betting
+  const [newsQuery, setNewsQuery] = useState('')
+  const [newsLines, setNewsLines] = useState([])
+  const [isFetchingContext, setIsFetchingContext] = useState(false)
+  const [lastContextFetchedAt, setLastContextFetchedAt] = useState(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [includeBacktest, setIncludeBacktest] = useState(false)
+  const [backtestSummary, setBacktestSummary] = useState(null)
   
   const intervalRef = useRef(null)
   const BACKEND_URL = 'http://localhost:5000'
@@ -69,11 +76,13 @@ export default function PredictOutput() {
   const handleCustomQuestionChange = (e) => {
     setCustomQuestion(e.target.value)
     setSelectedQuestion('')
+    setNewsLines([])
   }
 
   // Function to fetch signal from backend
   const fetchSignal = async () => {
     try {
+      setIsGenerating(true)
       const response = await fetch(`${BACKEND_URL}/api/generate-signal`, {
         method: 'POST',
         headers: {
@@ -82,8 +91,9 @@ export default function PredictOutput() {
         body: JSON.stringify({
           question: selectedQuestion || customQuestion,
           dataSources,
-      riskLevel,
-          marketPrice: 0.65 // Default market price, can be made dynamic
+          riskLevel,
+          marketPrice: 0.65,
+          includeBacktest: includeBacktest
         })
       })
 
@@ -91,6 +101,12 @@ export default function PredictOutput() {
       
       if (data.success) {
         setCurrentSignal(data.signal)
+        
+        // Store backtest summary if available
+        if (data.backtest_summary) {
+          setBacktestSummary(data.backtest_summary)
+        }
+        
         return data.signal
       } else {
         console.error('Failed to generate signal:', data.error)
@@ -99,6 +115,45 @@ export default function PredictOutput() {
     } catch (error) {
       console.error('Error fetching signal:', error)
       return null
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const fetchNewsContext = async () => {
+    const q = selectedQuestion || customQuestion
+    if (!q) {
+      alert('Please select or enter a question first')
+      return
+    }
+    setIsFetchingContext(true)
+    setNewsLines([])
+    setNewsQuery(q)
+    try {
+      console.log('Fetching news context for:', q)
+      const res = await fetch(`${BACKEND_URL}/api/news-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, limit: 6 })
+      })
+      
+      console.log('Response status:', res.status)
+      const data = await res.json()
+      console.log('Response data:', data)
+      
+      if (data?.success) {
+        setNewsLines(Array.isArray(data.lines) ? data.lines : [])
+        setLastContextFetchedAt(new Date())
+        console.log('News lines set:', data.lines?.length || 0)
+      } else {
+        console.error('Failed to fetch news context:', data)
+        alert(`Failed to fetch news: ${data?.error || 'Unknown error'}`)
+      }
+    } catch (err) {
+      console.error('Error fetching news context:', err)
+      alert(`Error fetching news: ${err.message}`)
+    } finally {
+      setIsFetchingContext(false)
     }
   }
   // Function to validate spending limit
@@ -356,7 +411,7 @@ export default function PredictOutput() {
   }
 
   return (
-    <section className="mx-auto max-w-4xl px-6 pt-16">
+  <section className="mx-auto max-w-7xl px-6 pt-16">
       <motion.h2 
         initial={{opacity:0,y:8}} 
         animate={{opacity:1,y:0}} 
@@ -374,6 +429,27 @@ export default function PredictOutput() {
       >
         Configure AI analysis parameters to generate profitable trading signals and predictions.
       </motion.p>
+
+      {/* Summary bar */}
+      <motion.div
+        initial={{opacity:0,y:8}}
+        animate={{opacity:1,y:0}}
+        transition={{delay:0.15}}
+        className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3"
+      >
+        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+          <div className="text-xs uppercase tracking-wide text-white/50">Risk Level</div>
+          <div className="mt-1 text-white font-medium">{riskLevel.split('-').map(w=>w[0].toUpperCase()+w.slice(1)).join(' ')}</div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+          <div className="text-xs uppercase tracking-wide text-white/50">Selected Sources</div>
+          <div className="mt-1 text-white font-medium">{dataSources.length} selected</div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+          <div className="text-xs uppercase tracking-wide text-white/50">Bet Config</div>
+          <div className="mt-1 text-white font-medium">{betAmount} HBAR • QID #{questionId}</div>
+        </div>
+      </motion.div>
 
       {/* Risk Settings */}
       <motion.div 
@@ -395,7 +471,7 @@ export default function PredictOutput() {
                   onClick={() => setRiskLevel(level)}
                   className={`px-4 py-2 rounded-lg border transition-all ${
                     riskLevel === level
-                      ? 'border-blue-500 bg-blue-500/20 text-white'
+                      ? 'border-accent bg-accent/20 text-white'
                       : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
                   }`}
                 >
@@ -437,7 +513,7 @@ export default function PredictOutput() {
               onClick={() => handleDataSourceToggle(source)}
               className={`p-3 rounded-lg border text-sm transition-all ${
                 dataSources.includes(source)
-                  ? 'border-green-500 bg-green-500/20 text-white'
+                  ? 'border-accent bg-accent/20 text-white'
                   : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
               }`}
             >
@@ -476,7 +552,7 @@ export default function PredictOutput() {
                 onClick={() => handleQuestionSelect(question)}
                 className={`w-full text-left p-3 rounded-lg border transition-all ${
                   selectedQuestion === question
-                    ? 'border-blue-500 bg-blue-500/20 text-white'
+                    ? 'border-accent bg-accent/20 text-white'
                     : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
                 }`}
               >
@@ -495,10 +571,131 @@ export default function PredictOutput() {
             value={customQuestion}
             onChange={handleCustomQuestionChange}
             placeholder="Enter your trading analysis question (e.g., 'Analyze Bitcoin price movement for next 48 hours')..."
-            className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-blue-500 focus:outline-none"
+            className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-accent focus:outline-none"
             rows="3"
           />
         </div>
+        
+        {/* Backtest Toggle */}
+        <div className="mt-6 p-4 rounded-lg bg-white/5 border border-white/10">
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="includeBacktest"
+              checked={includeBacktest}
+              onChange={(e) => setIncludeBacktest(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border-white/10 bg-white/5 text-accent focus:ring-accent focus:ring-offset-0"
+            />
+            <div className="flex-1">
+              <label htmlFor="includeBacktest" className="text-white font-medium cursor-pointer">
+                📊 Use Backtesting Context (Recommended)
+              </label>
+              <p className="text-sm text-white/60 mt-1">
+                Include historical performance data to improve prediction accuracy. The AI will consider how it performed on similar questions in the past.
+                {includeBacktest && <span className="text-amber-400"> ⚠️ This will take 30-60 seconds longer.</span>}
+              </p>
+              {backtestSummary && (
+                <div className="mt-3 p-3 rounded-lg bg-accent/10 border border-accent/20">
+                  <div className="text-sm text-white/80">
+                    <div className="font-semibold text-accent mb-1">Last Backtest Performance:</div>
+                    <div>• Accuracy: <span className="font-medium">{backtestSummary.accuracy}%</span></div>
+                    <div>• ROI: <span className="font-medium">{backtestSummary.roi}%</span></div>
+                    <div>• Total Bets: <span className="font-medium">{backtestSummary.total_bets}</span></div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* News Context Preview */}
+      <motion.div
+        initial={{opacity:0,y:8}}
+        animate={{opacity:1,y:0}}
+        transition={{delay:0.45}}
+        className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
+      >
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h3 className="text-lg font-semibold">4. News Context Preview</h3>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchNewsContext}
+              disabled={!(selectedQuestion || customQuestion) || isFetchingContext}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                !(selectedQuestion || customQuestion) || isFetchingContext
+                  ? 'bg-gray-600 cursor-not-allowed text-white/50'
+                  : 'bg-accent text-gray-900 hover:brightness-110'
+              }`}
+            >
+              {isFetchingContext ? 'Fetching…' : 'Fetch Context'}
+            </button>
+            <button
+              onClick={() => setNewsLines([])}
+              disabled={newsLines.length === 0}
+              className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+                newsLines.length === 0 ? 'bg-gray-600 cursor-not-allowed text-white/50' : 'bg-zinc-700 hover:bg-zinc-600 text-white'
+              }`}
+            >
+              Clear
+            </button>
+            <button
+              onClick={handleGenerateSignal}
+              disabled={(!selectedQuestion && !customQuestion) || isGenerating}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                (!selectedQuestion && !customQuestion) || isGenerating
+                  ? 'bg-gray-600 cursor-not-allowed text-white/50'
+                  : 'bg-accent text-gray-900 hover:brightness-110'
+              }`}
+            >
+              {isGenerating ? 'Generating…' : 'Generate Signal'}
+            </button>
+          </div>
+        </div>
+        <div className="text-sm text-white/60 mb-2">Query:</div>
+        <div className="text-white/80 text-sm font-mono break-words mb-4">
+          {(selectedQuestion || customQuestion) || '—'}
+        </div>
+        {lastContextFetchedAt && (
+          <div className="text-xs text-white/50 mb-2">Last fetched: {lastContextFetchedAt.toLocaleString()}</div>
+        )}
+        {newsLines.length > 0 ? (
+          <div>
+            <div className="text-sm text-white/60 mb-2">Context Lines:</div>
+            <div className="max-h-64 overflow-y-auto pr-2">
+              <ul className="space-y-2 text-sm text-white/80 list-disc pl-5">
+                {newsLines.map((l, i) => (
+                  <li key={i}>{l}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div className="text-white/50 text-sm">No context fetched yet.</div>
+        )}
+
+        {currentSignal && (
+          <div className="mt-6 p-4 rounded-lg bg-white/5 border border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-semibold">Latest Signal</h4>
+              <span
+                className={`px-2 py-1 rounded text-xs font-medium ${
+                  currentSignal.direction === 'BUY'
+                    ? 'bg-accent/20 text-accent'
+                    : currentSignal.direction === 'SELL'
+                    ? 'bg-red-500/20 text-red-300'
+                    : 'bg-gray-500/20 text-gray-300'
+                }`}
+              >
+                {currentSignal.direction}
+              </span>
+            </div>
+            <div className="text-sm text-white/80">
+              <div>Confidence: <span className="font-medium">{(currentSignal.confidence * 100).toFixed(1)}%</span></div>
+              <div className="mt-1 text-white/60">Reason: {currentSignal.reason}</div>
+            </div>
+          </div>
+        )}
       </motion.div>
 
       {/* Execution Mode */}
@@ -508,14 +705,14 @@ export default function PredictOutput() {
         transition={{delay:0.5}}
         className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
       >
-        <h3 className="text-lg font-semibold mb-4">4. Execution Mode</h3>
+  <h3 className="text-lg font-semibold mb-4">5. Execution Mode</h3>
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row gap-4">
             <button
               onClick={() => setSpendingMode('manual')}
               className={`flex-1 p-4 rounded-lg border transition-all ${
                 spendingMode === 'manual'
-                  ? 'border-blue-500 bg-blue-500/20 text-white'
+                  ? 'border-accent bg-accent/20 text-white'
                   : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
               }`}
             >
@@ -527,7 +724,7 @@ export default function PredictOutput() {
               onClick={() => setSpendingMode('auto')}
               className={`flex-1 p-4 rounded-lg border transition-all ${
                 spendingMode === 'auto'
-                  ? 'border-blue-500 bg-blue-500/20 text-white'
+                  ? 'border-accent bg-accent/20 text-white'
                   : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
               }`}
             >
@@ -547,7 +744,7 @@ export default function PredictOutput() {
                   value={agentAddress}
                   onChange={(e) => setAgentAddress(e.target.value)}
                   placeholder="Enter wallet address for autonomous execution..."
-                  className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-blue-500 focus:outline-none"
+                  className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-accent focus:outline-none"
                 />
               </div>
               
@@ -560,7 +757,7 @@ export default function PredictOutput() {
                   value={spendingLimit}
                   onChange={(e) => setSpendingLimit(e.target.value)}
                   placeholder="Enter maximum amount agent can spend..."
-                  className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-blue-500 focus:outline-none"
+                  className="w-full p-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder-white/30 focus:border-accent focus:outline-none"
                 />
                 <div className="text-xs text-white/50 mt-2">
                   This is the maximum amount the AI agent can spend on trades. Set according to your risk tolerance.
@@ -579,7 +776,7 @@ export default function PredictOutput() {
           transition={{delay:0.55}}
           className="mt-6 rounded-lg border border-white/10 bg-white/5 p-6"
         >
-          <h3 className="text-lg font-semibold mb-4">5. Autonomous Execution Settings</h3>
+          <h3 className="text-lg font-semibold mb-4">6. Autonomous Execution Settings</h3>
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -620,8 +817,8 @@ export default function PredictOutput() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-white/60">Autonomous Status:</span>
                 <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  autonomousStatus === 'running' ? 'bg-green-500/20 text-green-300' :
-                  autonomousStatus === 'completed' ? 'bg-blue-500/20 text-blue-300' :
+                  autonomousStatus === 'running' ? 'bg-accent/20 text-accent' :
+                  autonomousStatus === 'completed' ? 'bg-accent/10 text-accent' :
                   autonomousStatus === 'stopped' ? 'bg-red-500/20 text-red-300' :
                   'bg-gray-500/20 text-gray-300'
                 }`}>
@@ -638,7 +835,7 @@ export default function PredictOutput() {
               )}
               
               {spendingMode === 'auto' && agentAddress && spendingLimit && (
-                <div className="text-sm text-white/80 mb-2 p-2 bg-blue-500/10 rounded">
+                <div className="text-sm text-white/80 mb-2 p-2 bg-accent/10 rounded">
                   <div>Agent Wallet: <span className="font-mono text-xs">{agentAddress.slice(0, 6)}...{agentAddress.slice(-4)}</span></div>
                   <div>Spending Limit: <span className="font-medium">${spendingLimit}</span></div>
                   <div>Current Bet: <span className="font-medium">{betAmount} HBAR ≈ ${(parseFloat(betAmount) * 0.17).toFixed(2)}</span></div>
@@ -663,7 +860,7 @@ export default function PredictOutput() {
                       setCurrentSignal(null)
                       setNextSignalTime(null)
                     }}
-                    className="px-4 py-2 rounded-lg font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                    className="px-4 py-2 rounded-lg font-medium bg-accent text-gray-900 hover:brightness-110 transition-colors"
                   >
                     Reset for New Question
                   </button>
@@ -675,7 +872,7 @@ export default function PredictOutput() {
                   className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                     (!selectedQuestion && !customQuestion)
                       ? 'bg-gray-600 cursor-not-allowed text-white/50'
-                      : 'bg-green-600 hover:bg-green-700 text-white'
+                      : 'bg-accent text-gray-900 hover:brightness-110'
                   }`}
                 >
                   Start Autonomous Trading
@@ -701,17 +898,24 @@ export default function PredictOutput() {
         className="mt-8"
       >
         <button
-          onClick={handleGenerateSignal}
-          disabled={!selectedQuestion && !customQuestion}
+          onClick={async () => {
+            try {
+              setIsGenerating(true)
+              await handleGenerateSignal()
+            } finally {
+              setIsGenerating(false)
+            }
+          }}
+          disabled={(!selectedQuestion && !customQuestion) || isGenerating}
           className={`w-full font-semibold py-3 px-6 rounded-lg transition-colors ${
-            (!selectedQuestion && !customQuestion)
+            (!selectedQuestion && !customQuestion) || isGenerating
               ? 'bg-gray-600 cursor-not-allowed text-white/50'
-              : spendingMode === 'auto' 
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : 'bg-green-600 hover:bg-green-700 text-white'
+              : 'bg-accent text-gray-900 hover:brightness-110'
           }`}
         >
-          {spendingMode === 'auto' ? 'Start Autonomous Trading' : 'Generate Trading Signal'}
+          {isGenerating
+            ? 'Generating…'
+            : (spendingMode === 'auto' ? 'Start Autonomous Trading' : 'Generate Trading Signal')}
         </button>
         <div className="text-center text-white/50 text-sm mt-3">
           {!selectedQuestion && !customQuestion 
@@ -728,9 +932,9 @@ export default function PredictOutput() {
         initial={{opacity:0}} 
         animate={{opacity:1}} 
         transition={{delay:0.7}}
-        className="mt-8 p-4 rounded-lg bg-blue-500/10 border border-blue-500/20"
+  className="mt-8 p-4 rounded-lg bg-accent/10 border border-accent/20"
       >
-        <h4 className="font-semibold text-blue-300 mb-2">How it works:</h4>
+  <h4 className="font-semibold text-accent mb-2">How it works:</h4>
         <ul className="text-sm text-white/70 space-y-1">
           <li>• AI analyzes selected data sources in real-time</li>
           <li>• Generates predictions based on your risk tolerance</li>

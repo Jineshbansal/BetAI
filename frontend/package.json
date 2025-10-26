@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@hashgraph/hashconnect": "^1.10.3",
+    "@heroicons/react": "^2.1.1",
     "@hashgraph/sdk": "^2.75.0",
     "@langchain/core": "^0.3.78",
     "@langchain/groq": "^0.2.4",

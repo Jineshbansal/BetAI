@@ -5,7 +5,6 @@ import { useWallet } from '../contexts/WalletContext'
 import { CONTRACT_ADDRESS, contractABI, HEDERA_CONTRACT_ID, HEDERA_TESTNET_CHAIN_ID_HEX, HEDERA_TESTNET_RPC } from '../contracts/config'
 import PredictionGrid from '../components/PredictionGrid'
 import ResolveTab from '../components/ResolveTab'
-// Hedera SDK for direct HBAR txs (normal method)
 import { Client, ContractExecuteTransaction, Hbar, ContractFunctionParameters, PrivateKey, AccountId } from '@hashgraph/sdk'
 
 export default function PredictionMarket() {
@@ -17,19 +16,17 @@ export default function PredictionMarket() {
   const [lastError, setLastError] = useState('')
   const [oracleAddr, setOracleAddr] = useState('')
   const [questionCount, setQuestionCount] = useState(null)
-  const [hasCode, setHasCode] = useState(null) // null=unknown, true/false once checked
-  const [activeTab, setActiveTab] = useState('markets') // 'markets' | 'resolve'
+  const [hasCode, setHasCode] = useState(null)
+  const [activeTab, setActiveTab] = useState('markets')
   const [questions, setQuestions] = useState([])
   const [loadingQuestions, setLoadingQuestions] = useState(false)
 
-  // addQuestion form
   const [newQ, setNewQ] = useState('')
   const [newOutcomes, setNewOutcomes] = useState('Yes,No')
-  const [newEndTime, setNewEndTime] = useState('') // unix seconds
+  const [newEndTime, setNewEndTime] = useState('')
 
-  // placeBet form
   const [betOutcomeIndex, setBetOutcomeIndex] = useState('0')
-  const [betAmount, setBetAmount] = useState('0.0') // ETH as string
+  const [betAmount, setBetAmount] = useState('0.0')
 
   const contract = useMemo(() => {
     try {
@@ -43,7 +40,6 @@ export default function PredictionMarket() {
     }
   }, [signer])
 
-  // Read-only contract via Hedera RPC to avoid wallet network issues for reads
   const readContract = useMemo(() => {
     try {
       if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') return null
@@ -56,7 +52,6 @@ export default function PredictionMarket() {
     }
   }, [])
 
-  // Check that the contract code exists at the address on Hedera Testnet
   useEffect(() => {
     let cancelled = false
     async function checkCode() {
@@ -80,7 +75,6 @@ export default function PredictionMarket() {
         await ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: HEDERA_TESTNET_CHAIN_ID_HEX }] })
       }
     } catch (e) {
-      // If chain is not added to wallet, attempt to add it (error code 4902)
       if (e && (e.code === 4902 || e.message?.includes('Unrecognized chain ID'))) {
         try {
           await ethereum.request({
@@ -108,14 +102,12 @@ export default function PredictionMarket() {
     setLoadingMarket(true)
     try {
       setLastError('')
-      // Validate id is a non-negative integer
       const idStr = String(id).trim()
       if (!/^\d+$/.test(idStr)) {
         setLastError('Question ID must be a non-negative integer')
         setMarket(null)
         return
       }
-      // Sanity check: ensure code exists at the address; helps diagnose BAD_DATA
       try {
         const roProvider = new ethers.JsonRpcProvider(HEDERA_TESTNET_RPC)
         const code = await roProvider.getCode(CONTRACT_ADDRESS)
@@ -130,7 +122,6 @@ export default function PredictionMarket() {
       }
       try {
         const res = await c.getMarket(BigInt(id))
-        // res: [question, outcomes[], endTime, marketResolved, winningOutcome, totalMarketPool]
         const parsed = {
           question: res[0],
           outcomes: (res[1] || []).map((o) => ({ name: o.name, totalBetAmount: o.totalBetAmount?.toString?.() || String(o.totalBetAmount) })),
@@ -141,7 +132,6 @@ export default function PredictionMarket() {
         }
         setMarket(parsed)
       } catch (callErr) {
-        // Fallback: some RPCs may return 0x for tuple[] returns; try minimal questions() read
         const isBadData = callErr?.code === 'BAD_DATA' || String(callErr?.message || '').includes('could not decode result data')
         if (!isBadData) {
           setLastError(normalizeErr(callErr))
@@ -150,10 +140,9 @@ export default function PredictionMarket() {
         }
         try {
           const q = await c.questions(BigInt(id))
-          // q: [question, endTime, marketResolved, winningOutcome, totalMarketPool]
           setMarket({
             question: q[0],
-            outcomes: null, // unknown
+            outcomes: null,
             endTime: Number(q[1]),
             marketResolved: Boolean(q[2]),
             winningOutcome: Number(q[3]),
@@ -175,8 +164,6 @@ export default function PredictionMarket() {
       setLoadingMarket(false)
     }
   }
-
-  // Normalize a question by id using getMarket with fallback to questions()
   async function getQuestionById(id) {
     const c = readContract || contract
     if (!c) return null
@@ -208,8 +195,6 @@ export default function PredictionMarket() {
       }
     }
   }
-
-  // Fetch all questions like getQuestions() by iterating the counter
   async function fetchAllQuestions() {
     const c = readContract || contract
     if (!c) return
@@ -220,11 +205,9 @@ export default function PredictionMarket() {
       const n = Number(counter || 0n)
       const items = []
       for (let i = 0; i < n; i++) {
-        // Many contracts are 0-based; if empty, skip
         const q = await getQuestionById(i).catch(() => null)
         if (q && q.question) items.push(q)
       }
-      // If nothing found, try 1..n as a fallback for 1-based ids
       if (items.length === 0) {
         for (let i = 1; i <= n; i++) {
           const q = await getQuestionById(i).catch(() => null)
@@ -240,11 +223,8 @@ export default function PredictionMarket() {
   }
 
   useEffect(() => {
-    // auto fetch on questionId change if valid
     if (questionId && (contract || readContract)) fetchMarket(questionId).catch(() => {})
   }, [questionId, contract, readContract])
-
-  // Owner-only: Add question handler (used in Resolve tab)
   async function handleAddQuestion({ question, outcomesCsv, endTime }) {
     if (!contract) return
     if (!isOwner) { setLastError('Only owner can add questions.'); return }
@@ -254,14 +234,12 @@ export default function PredictionMarket() {
       setLastError('')
       const qStr = String(question || '').trim()
       const outcomeArr = String(outcomesCsv || '').split(',').map(s => s.trim()).filter(Boolean)
-      // Validation
       if (!qStr) throw new Error('Question cannot be empty')
       if (!outcomeArr.length) throw new Error('Provide at least one outcome (e.g., Yes,No)')
       const nowSec = Math.floor(Date.now()/1000)
       const endSec = Number(endTime) > 0 ? Number(endTime) : (nowSec + 3600)
       if (endSec <= nowSec) throw new Error('End time must be in the future (unix seconds)')
 
-      // Populate via getFunction (ethers v6) with fallback to direct call
       let txResponse
       try {
         const fn = contract.getFunction ? contract.getFunction('addQuestion') : null
@@ -272,11 +250,9 @@ export default function PredictionMarket() {
             gasLimit: populated.gasLimit ?? 500000n
           })
         } else {
-          // Fallback direct call
           txResponse = await contract.addQuestion(qStr, outcomeArr, BigInt(endSec), { gasLimit: 500000n })
         }
       } catch (popErr) {
-        // If populate not supported, fallback direct call
         txResponse = await contract.addQuestion(qStr, outcomeArr, BigInt(endSec), { gasLimit: 500000n })
       }
       await txResponse.wait()
@@ -352,7 +328,6 @@ export default function PredictionMarket() {
     }
   }
 
-  // Helper to prettify common EVM errors
   function normalizeErr(e) {
     try {
       if (!e) return 'Unknown error'
@@ -364,8 +339,6 @@ export default function PredictionMarket() {
       return JSON.stringify(e)
     } catch { return 'Unknown error' }
   }
-
-  // Fetch some globals (oracle, counter)
   useEffect(() => {
     let cancelled = false
     async function loadGlobals() {
@@ -384,13 +357,10 @@ export default function PredictionMarket() {
     loadGlobals()
     return () => { cancelled = true }
   }, [contract])
-
-  // Load all questions when contract/readContract is ready
   useEffect(() => {
     if (contract || readContract) {
       fetchAllQuestions().catch(() => {})
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contract, readContract])
 
   const isOwner = useMemo(() => {
@@ -398,43 +368,36 @@ export default function PredictionMarket() {
     return account.toLowerCase() === oracleAddr.toLowerCase()
   }, [account, oracleAddr])
 
-  // Map UI action from cards -> Hedera SDK payable call (HBAR, not ETH)
   async function handlePredict(qId, optionIndex, amountHBAR) {
+    const ACC = String(import.meta.env.VITE_MY_ACCOUNT_ID || '').trim()
+    const KEY = String(import.meta.env.VITE_MY_PRIVATE_KEY || '').trim()
+    if (!ACC || !KEY) {
+      setLastError('Missing Hedera operator keys. Create frontend/.env.local with VITE_MY_ACCOUNT_ID and VITE_MY_PRIVATE_KEY, then restart the dev server.')
+      return
+    }
     try {
       setTxPending(true)
       setLastError('')
       const amtStr = String(amountHBAR || '').trim()
       if (!amtStr || Number(amtStr) <= 0) throw new Error('Enter an amount greater than 0 (in HBAR).')
 
-      // Hedera client using operator keys (dev method, same as PredictOutput.jsx)
-      const ACC = String(import.meta.env.VITE_MY_ACCOUNT_ID || '').trim()
-      const KEY = String(import.meta.env.VITE_MY_PRIVATE_KEY || '').trim()
-      if (!ACC || !KEY) {
-        throw new Error('Missing Hedera operator keys. Create frontend/.env.local with VITE_MY_ACCOUNT_ID and VITE_MY_PRIVATE_KEY, then restart the dev server.')
-      }
       const client = Client.forTestnet()
       let priv
       try {
         const keyNo0x = KEY.startsWith('0x') ? KEY.slice(2) : KEY
         if (/^0x[0-9a-fA-F]{64}$/.test(KEY)) {
-          // ECDSA secp256k1 raw hex
           priv = PrivateKey.fromStringECDSA(KEY)
         } else if (/^(302e|302d|302c)/i.test(keyNo0x)) {
-          // DER-encoded Ed25519 private key (hex)
           priv = PrivateKey.fromStringDer(keyNo0x)
         } else if (/^[0-9a-fA-F]{64}$/.test(KEY)) {
-          // Raw 32-byte Ed25519 hex (rare). Prefer DER but support this.
           priv = PrivateKey.fromStringED25519(KEY)
         } else {
-          // Fallback to generic (may still warn)
           priv = PrivateKey.fromString(KEY)
         }
       } catch (e) {
-        throw new Error('Private key format not recognized. Use 0x<64-hex> for ECDSA, 302e.. DER hex for Ed25519, or paste the DER string provided by your wallet.')
+        throw new Error('Private key format not recognized.')
       }
       client.setOperator(AccountId.fromString(ACC), priv)
-
-      // Convert HBAR to tinybars (1 HBAR = 100,000,000 tinybars)
       const amountTinybars = Hbar.from(amtStr).toTinybars()
 
       const tx = new ContractExecuteTransaction()
@@ -469,7 +432,6 @@ export default function PredictionMarket() {
     }
   }
 
-  // Map UI action resolveQuestion(questionId, winner) -> resolveMarket
   async function handleResolve(questionId, winnerIdx) {
     if (!contract || !signer) { setLastError('Connect wallet first.'); return }
     if (!isOwner) { setLastError('Only owner can resolve.'); return }
@@ -507,12 +469,10 @@ export default function PredictionMarket() {
             className={`pb-2 text-sm ${activeTab==='markets' ? 'text-accent border-b-2 border-accent' : 'text-white/60'}`}
             onClick={()=>setActiveTab('markets')}
           >Markets</button>
-          {isOwner && (
-            <button
-              className={`pb-2 text-sm ${activeTab==='resolve' ? 'text-accent border-b-2 border-accent' : 'text-white/60'}`}
-              onClick={()=>setActiveTab('resolve')}
-            >Admin</button>
-          )}
+          <button
+            className={`pb-2 text-sm ${activeTab==='resolve' ? 'text-accent border-b-2 border-accent' : 'text-white/60'}`}
+            onClick={()=>setActiveTab('resolve')}
+          >Admin</button>
           <div className="flex-1" />
           {oracleAddr && (
             <div className="text-xs text-white/60">Owner: <span className="text-white/80">{oracleAddr.slice(0,6)}…{oracleAddr.slice(-4)}</span></div>
@@ -528,8 +488,6 @@ export default function PredictionMarket() {
           )}
         </div>
       </div>
-
-      {/* Removed advanced panels from Markets to keep user actions focused on cards */}
     </section>
   )
 }
